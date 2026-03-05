@@ -62,6 +62,8 @@ CREATE TABLE IF NOT EXISTS teachers (
     profile_pic TEXT,
     password TEXT,
     has_changed_password BOOLEAN DEFAULT FALSE,
+    notifications_enabled BOOLEAN DEFAULT FALSE,
+    email_enabled BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -120,6 +122,8 @@ CREATE TABLE IF NOT EXISTS students (
     phone TEXT,
     password TEXT,
     has_changed_password BOOLEAN DEFAULT FALSE,
+    notifications_enabled BOOLEAN DEFAULT FALSE,
+    email_enabled BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -462,6 +466,267 @@ $$ LANGUAGE plpgsql;
 -- ALTER TABLE students
 -- ADD COLUMN IF NOT EXISTS password TEXT,
 -- ADD COLUMN IF NOT EXISTS has_changed_password BOOLEAN DEFAULT FALSE;
+
+-- =====================================================
+-- 9. APPOINTMENTS TABLE (Student ↔ Teacher)
+-- =====================================================
+CREATE TABLE IF NOT EXISTS appointments (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    teacher_initial TEXT NOT NULL REFERENCES teachers(initial) ON DELETE CASCADE,
+    student_id TEXT NOT NULL REFERENCES students(student_id) ON DELETE CASCADE,
+    student_name TEXT NOT NULL,
+    date DATE NOT NULL,
+    time TIME NOT NULL,
+    purpose TEXT,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'rejected')),
+    teacher_remarks TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX idx_appointments_teacher ON appointments(teacher_initial);
+CREATE INDEX idx_appointments_student ON appointments(student_id);
+CREATE INDEX idx_appointments_status ON appointments(status);
+CREATE INDEX idx_appointments_date ON appointments(date);
+
+-- Trigger for updated_at
+CREATE TRIGGER update_appointments_updated_at BEFORE UPDATE ON appointments
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- RLS
+ALTER TABLE appointments ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow all on appointments" ON appointments FOR ALL USING (true);
+
+-- =====================================================
+-- MIGRATION: ADD APPOINTMENTS TABLE (RUN IF UPDATING EXISTING DB)
+-- =====================================================
+-- If you already have the existing schema, just run the block above
+-- (CREATE TABLE appointments ... through CREATE POLICY)
+
+-- =====================================================
+-- 10. NOTIFICATIONS TABLE (In-App Notifications)
+-- =====================================================
+CREATE TABLE IF NOT EXISTS notifications (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    type TEXT NOT NULL CHECK (type IN (
+        'class_cancelled', 'class_rescheduled', 'room_changed',
+        'class_restored', 'daily_reminder', 'appointment',
+        'general', 'class_assigned', 'class_updated', 'class_removed',
+        'teacher_added', 'course_added'
+    )),
+    title TEXT NOT NULL,
+    body TEXT NOT NULL,
+    recipient_type TEXT NOT NULL CHECK (recipient_type IN ('super_admin', 'student', 'teacher')),
+    recipient_id TEXT NOT NULL, -- student_id, teacher_initial, or 'all_admins'
+    related_entry_id UUID,
+    is_read BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX idx_notifications_recipient ON notifications(recipient_type, recipient_id);
+CREATE INDEX idx_notifications_type ON notifications(type);
+CREATE INDEX idx_notifications_read ON notifications(is_read);
+CREATE INDEX idx_notifications_created ON notifications(created_at DESC);
+
+-- Trigger for updated_at
+CREATE TRIGGER update_notifications_updated_at BEFORE UPDATE ON notifications
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- RLS
+ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow all on notifications" ON notifications FOR ALL USING (true);
+
+-- =====================================================
+-- REALTIME: Enable realtime for all key tables
+-- =====================================================
+-- Run in Supabase SQL Editor:
+ALTER PUBLICATION supabase_realtime ADD TABLE notifications;
+ALTER PUBLICATION supabase_realtime ADD TABLE teachers;
+ALTER PUBLICATION supabase_realtime ADD TABLE students;
+ALTER PUBLICATION supabase_realtime ADD TABLE courses;
+ALTER PUBLICATION supabase_realtime ADD TABLE rooms;
+ALTER PUBLICATION supabase_realtime ADD TABLE batches;
+ALTER PUBLICATION supabase_realtime ADD TABLE timetable_entries;
+
+-- =====================================================
+-- 11. DATABASE TRIGGER: Auto-create notifications on timetable changes
+-- =====================================================
+
+-- Function: When a timetable entry is updated (cancelled, rescheduled, room changed, restored)
+-- automatically insert notification rows for super_admin + all students in that batch
+CREATE OR REPLACE FUNCTION notify_on_timetable_change()
+RETURNS TRIGGER AS $$
+DECLARE
+    course_title_val TEXT;
+    teacher_name_val TEXT;
+    batch_name_val TEXT;
+    room_name_val TEXT;
+    new_room_name_val TEXT;
+    notif_type TEXT;
+    notif_title TEXT;
+    notif_body TEXT;
+    student_rec RECORD;
+BEGIN
+    -- Get related info
+    SELECT title INTO course_title_val FROM courses WHERE code = NEW.course_code;
+    SELECT name INTO teacher_name_val FROM teachers WHERE initial = NEW.teacher_initial;
+    SELECT name INTO batch_name_val FROM batches WHERE id = NEW.batch_id;
+    SELECT name INTO room_name_val FROM rooms WHERE id = OLD.room_id;
+
+    -- Determine notification type
+    IF NEW.is_cancelled = TRUE AND OLD.is_cancelled = FALSE THEN
+        notif_type := 'class_cancelled';
+        notif_title := 'Class Cancelled';
+        notif_body := course_title_val || ' (' || NEW.course_code || ') on ' || NEW.day ||
+                      ' ' || NEW.start_time::TEXT || '-' || NEW.end_time::TEXT ||
+                      ' by ' || teacher_name_val ||
+                      COALESCE(' — Reason: ' || NEW.cancellation_reason, '');
+
+    ELSIF NEW.is_cancelled = FALSE AND OLD.is_cancelled = TRUE THEN
+        notif_type := 'class_restored';
+        notif_title := 'Class Restored';
+        notif_body := course_title_val || ' (' || NEW.course_code || ') on ' || NEW.day ||
+                      ' ' || NEW.start_time::TEXT || '-' || NEW.end_time::TEXT ||
+                      ' by ' || teacher_name_val || ' has been restored.';
+
+    ELSIF NEW.day != OLD.day OR NEW.start_time != OLD.start_time OR NEW.end_time != OLD.end_time OR NEW.mode != OLD.mode THEN
+        notif_type := 'class_rescheduled';
+        notif_title := 'Class Rescheduled';
+        notif_body := course_title_val || ' (' || NEW.course_code || ') moved from ' ||
+                      OLD.day || ' ' || OLD.start_time::TEXT || '-' || OLD.end_time::TEXT ||
+                      ' to ' || NEW.day || ' ' || NEW.start_time::TEXT || '-' || NEW.end_time::TEXT ||
+                      ' (' || NEW.mode || ') by ' || teacher_name_val;
+
+    ELSIF NEW.room_id IS DISTINCT FROM OLD.room_id THEN
+        SELECT name INTO new_room_name_val FROM rooms WHERE id = NEW.room_id;
+        notif_type := 'room_changed';
+        notif_title := 'Room Changed';
+        notif_body := course_title_val || ' (' || NEW.course_code || ') on ' || NEW.day ||
+                      ': Room changed from ' || COALESCE(room_name_val, 'N/A') ||
+                      ' to ' || COALESCE(new_room_name_val, 'N/A') ||
+                      ' by ' || teacher_name_val;
+
+    ELSE
+        -- No significant change
+        RETURN NEW;
+    END IF;
+
+    -- Notify all super admins
+    INSERT INTO notifications (type, title, body, recipient_type, recipient_id, related_entry_id)
+    SELECT notif_type, notif_title, notif_body, 'super_admin', username, NEW.id
+    FROM admins WHERE type = 'super_admin';
+
+    -- Notify all students in the affected batch (only if notifications_enabled)
+    FOR student_rec IN
+        SELECT student_id FROM students WHERE batch_id = NEW.batch_id AND notifications_enabled = TRUE
+    LOOP
+        INSERT INTO notifications (type, title, body, recipient_type, recipient_id, related_entry_id)
+        VALUES (notif_type, notif_title, notif_body, 'student', student_rec.student_id, NEW.id);
+    END LOOP;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER timetable_change_notification
+    AFTER UPDATE ON timetable_entries
+    FOR EACH ROW
+    EXECUTE FUNCTION notify_on_timetable_change();
+
+-- =====================================================
+-- 12. DATABASE FUNCTION: Send email via Edge Function
+-- =====================================================
+-- This function is called by the Edge Functions (not directly from DB)
+-- The Edge Functions poll notifications table or use webhooks
+
+-- Helper view: Get students with emails for a batch (used by Edge Functions)
+-- Only includes students with email_enabled = true
+CREATE OR REPLACE VIEW v_batch_student_emails AS
+SELECT
+    s.student_id,
+    s.name,
+    s.email,
+    s.batch_id,
+    b.name as batch_name,
+    s.notifications_enabled,
+    s.email_enabled
+FROM students s
+JOIN batches b ON s.batch_id = b.id
+WHERE s.email IS NOT NULL AND s.email != '' AND s.email_enabled = TRUE;
+
+-- Helper view: Get admin emails (used by Edge Functions)
+CREATE OR REPLACE VIEW v_admin_emails AS
+SELECT username as email, type FROM admins;
+
+-- =====================================================
+-- 13. DAILY REMINDER FUNCTION (Called by pg_cron or Edge Function)
+-- =====================================================
+-- This function creates daily reminder notifications at midnight
+-- for all students who have notifications_enabled = true
+-- It sends reminders about the next day's schedule
+
+CREATE OR REPLACE FUNCTION create_daily_reminders()
+RETURNS void AS $$
+DECLARE
+    tomorrow_day TEXT;
+    student_rec RECORD;
+    entry_count INT;
+    reminder_body TEXT;
+BEGIN
+    -- Get tomorrow's day name
+    SELECT CASE EXTRACT(DOW FROM (CURRENT_DATE + INTERVAL '1 day'))
+        WHEN 0 THEN 'Sun' WHEN 1 THEN 'Mon' WHEN 2 THEN 'Tue'
+        WHEN 3 THEN 'Wed' WHEN 4 THEN 'Thu' WHEN 5 THEN 'Fri'
+        WHEN 6 THEN 'Sat'
+    END INTO tomorrow_day;
+
+    -- For each student with notifications enabled
+    FOR student_rec IN
+        SELECT s.student_id, s.name, s.batch_id, s.email, s.email_enabled
+        FROM students s
+        WHERE s.notifications_enabled = TRUE
+    LOOP
+        -- Count tomorrow's classes for this student's batch
+        SELECT COUNT(*) INTO entry_count
+        FROM timetable_entries te
+        WHERE te.batch_id = student_rec.batch_id
+          AND te.day = tomorrow_day
+          AND te.is_cancelled = FALSE;
+
+        IF entry_count > 0 THEN
+            reminder_body := 'You have ' || entry_count || ' class(es) tomorrow (' || tomorrow_day || '). Check your schedule!';
+        ELSE
+            reminder_body := 'No classes scheduled for tomorrow (' || tomorrow_day || '). Enjoy your day off!';
+        END IF;
+
+        -- Create in-app notification
+        INSERT INTO notifications (type, title, body, recipient_type, recipient_id)
+        VALUES ('daily_reminder', 'Tomorrow''s Schedule', reminder_body, 'student', student_rec.student_id);
+    END LOOP;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Schedule daily at midnight (Asia/Dhaka = UTC+6, so 18:00 UTC = 00:00 BDT)
+-- Requires pg_cron extension enabled in Supabase:
+-- SELECT cron.schedule('daily-reminders', '0 18 * * *', 'SELECT create_daily_reminders()');
+
+-- =====================================================
+-- MIGRATION: ADD NOTIFICATIONS (RUN IF UPDATING EXISTING DB)
+-- =====================================================
+-- Run the CREATE TABLE notifications block above
+-- Then: ALTER PUBLICATION supabase_realtime ADD TABLE notifications;
+
+-- =====================================================
+-- MIGRATION: ADD PERMISSION COLUMNS (RUN IF UPDATING EXISTING DB)
+-- =====================================================
+-- ALTER TABLE teachers
+-- ADD COLUMN IF NOT EXISTS notifications_enabled BOOLEAN DEFAULT FALSE,
+-- ADD COLUMN IF NOT EXISTS email_enabled BOOLEAN DEFAULT FALSE;
+
+-- ALTER TABLE students
+-- ADD COLUMN IF NOT EXISTS notifications_enabled BOOLEAN DEFAULT FALSE,
+-- ADD COLUMN IF NOT EXISTS email_enabled BOOLEAN DEFAULT FALSE;
 
 -- =====================================================
 -- COMPLETION MESSAGE

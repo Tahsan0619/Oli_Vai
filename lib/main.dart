@@ -1,127 +1,55 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'services/supabase_service.dart';
 import 'services/data_repository.dart';
+import 'services/local_notification_service.dart';
 import 'models/admin.dart';
+import 'models/student.dart';
+import 'models/teacher.dart';
 import 'screens/unified_login_screen_new.dart';
 import 'screens/super_admin_portal_screen_new.dart';
 import 'screens/teacher_admin_portal_screen_new.dart';
 import 'screens/main_navigation_screen.dart';
+import 'utils/app_theme.dart';
 
-/// Routine Scrapper - University Schedule Management System
-/// A class schedule management app
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
-  // Initialize Supabase
+
   await Supabase.initialize(
     url: 'https://yofrdlyzetcezbhhbkdb.supabase.co',
     anonKey: 'sb_publishable_YEooiBZGo8WjkgFu5mfqlw_mC-6d0YM',
   );
-  
+
+  // Initialize local push notifications
+  await LocalNotificationService.instance.initialize();
+
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,
-    statusBarIconBrightness: Brightness.light,
+    statusBarIconBrightness: Brightness.dark,
+    systemNavigationBarColor: Colors.white,
+    systemNavigationBarIconBrightness: Brightness.dark,
   ));
+
   runApp(const RoutineScrapperApp());
 }
 
-/// Main application widget
 class RoutineScrapperApp extends StatelessWidget {
   const RoutineScrapperApp({super.key});
 
   @override
   Widget build(BuildContext context) {
-    // Dark theme color scheme
-    final colorScheme = ColorScheme.dark(
-      primary: const Color(0xFF5B7CFF),
-      secondary: const Color(0xFF8A5BFF),
-      surface: const Color(0xFF1E1E1E),
-      onPrimary: Colors.white,
-      onSecondary: Colors.white,
-      onSurface: Colors.white,
-    );
-
     return ChangeNotifierProvider(
       create: (_) {
         final service = SupabaseService();
-        // Initialize service asynchronously
         service.initialize();
         return service;
       },
       child: MaterialApp(
         debugShowCheckedModeBanner: false,
-        title: 'EDTE Routine Scrapper',
-        theme: ThemeData(
-          useMaterial3: true,
-          colorScheme: colorScheme,
-          scaffoldBackgroundColor: const Color(0xFF121212),
-          textTheme: GoogleFonts.poppinsTextTheme(ThemeData.dark().textTheme),
-          appBarTheme: AppBarTheme(
-            backgroundColor: const Color(0xFF1E1E1E),
-            foregroundColor: Colors.white,
-            elevation: 0,
-            centerTitle: false,
-            systemOverlayStyle: SystemUiOverlayStyle.light,
-            titleTextStyle: GoogleFonts.poppins(
-              fontSize: 20,
-              fontWeight: FontWeight.w600,
-              color: Colors.white,
-            ),
-          ),
-          inputDecorationTheme: InputDecorationTheme(
-            filled: true,
-            fillColor: const Color(0xFF2A2A2A),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide.none,
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide.none,
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: Color(0xFF5B7CFF), width: 2),
-            ),
-            hintStyle: TextStyle(color: Colors.grey[600]),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-          ),
-          cardTheme: CardThemeData(
-            color: const Color(0xFF2A2A2A),
-            elevation: 0,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-            ),
-          ),
-          elevatedButtonTheme: ElevatedButtonThemeData(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF5B7CFF),
-              foregroundColor: Colors.white,
-              elevation: 0,
-              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-              textStyle: GoogleFonts.poppins(
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-          bottomNavigationBarTheme: BottomNavigationBarThemeData(
-            backgroundColor: const Color(0xFF1E1E1E),
-            selectedItemColor: const Color(0xFF5B7CFF),
-            unselectedItemColor: Colors.grey[600],
-            type: BottomNavigationBarType.fixed,
-            elevation: 8,
-            selectedLabelStyle: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600),
-            unselectedLabelStyle: GoogleFonts.poppins(fontSize: 12),
-          ),
-        ),
+        title: 'EDTE Routine',
+        theme: AppTheme.lightTheme,
         home: const AuthCheck(),
         onGenerateRoute: (settings) {
           if (settings.name == '/') {
@@ -134,7 +62,6 @@ class RoutineScrapperApp extends StatelessWidget {
   }
 }
 
-/// Widget to check authentication state
 class AuthCheck extends StatefulWidget {
   const AuthCheck({super.key});
 
@@ -142,15 +69,31 @@ class AuthCheck extends StatefulWidget {
   State<AuthCheck> createState() => _AuthCheckState();
 }
 
-class _AuthCheckState extends State<AuthCheck> {
+class _AuthCheckState extends State<AuthCheck>
+    with SingleTickerProviderStateMixin {
   late DataRepository _repo;
   bool _repoInitialized = false;
   bool _serviceInitialized = false;
+  late AnimationController _pulseCtrl;
+  late Animation<double> _pulseAnim;
 
   @override
   void initState() {
     super.initState();
+    _pulseCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..repeat(reverse: true);
+    _pulseAnim = Tween<double>(begin: 0.85, end: 1.0).animate(
+      CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut),
+    );
     _initializeRepo();
+  }
+
+  @override
+  void dispose() {
+    _pulseCtrl.dispose();
+    super.dispose();
   }
 
   Future<void> _initializeRepo() async {
@@ -169,21 +112,47 @@ class _AuthCheckState extends State<AuthCheck> {
   @override
   Widget build(BuildContext context) {
     if (!_repoInitialized || !_serviceInitialized) {
-      return const Scaffold(
-        backgroundColor: Color(0xFF121212),
+      return Scaffold(
+        backgroundColor: AppTheme.scaffoldBg,
         body: Center(
-          child: CircularProgressIndicator(
-            color: Color(0xFF5B7CFF),
+          child: AnimatedBuilder(
+            animation: _pulseAnim,
+            builder: (context, child) {
+              return Transform.scale(
+                scale: _pulseAnim.value,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 80,
+                      height: 80,
+                      decoration: BoxDecoration(
+                        gradient: AppTheme.studentGradient,
+                        borderRadius: BorderRadius.circular(20),
+                        boxShadow: AppTheme.softShadow(AppTheme.primaryBlue),
+                      ),
+                      child: const Icon(Icons.school_rounded, size: 40, color: Colors.white),
+                    ),
+                    const SizedBox(height: 24),
+                    Text('Loading...', style: AppTheme.subtitle),
+                  ],
+                ),
+              );
+            },
           ),
         ),
       );
     }
 
-    return Consumer<SupabaseService>(
-      builder: (context, supabaseService, _) {
-        // If user is already logged in, show the appropriate dashboard
-        if (supabaseService.currentAdmin != null) {
-          final admin = supabaseService.currentAdmin!;
+    // Use Selector instead of Consumer to only rebuild when login state changes.
+    // Consumer rebuilds on EVERY notifyListeners() call (including CRUD ops),
+    // which destroys the entire widget tree and loses permission toggles, etc.
+    return Selector<SupabaseService, ({Admin? admin, Student? student, Teacher? teacher})>(
+      selector: (_, svc) => (admin: svc.currentAdmin, student: svc.currentStudent, teacher: svc.currentTeacher),
+      builder: (context, state, _) {
+        final supabaseService = context.read<SupabaseService>();
+        if (state.admin != null) {
+          final admin = state.admin!;
           if (admin.type == 'super_admin') {
             return const SuperAdminPortalScreenNew();
           } else if (admin.type == 'teacher_admin') {
@@ -193,27 +162,21 @@ class _AuthCheckState extends State<AuthCheck> {
             );
           }
         }
-        
-        // Check if student is logged in
-        if (supabaseService.currentStudent != null) {
+        if (state.student != null) {
           return const MainNavigationScreen();
         }
-        
-        // Check if teacher is logged in
-        if (supabaseService.currentTeacher != null) {
+        if (state.teacher != null) {
           return TeacherAdminPortalScreen(
             repo: _repo,
             admin: Admin(
-              id: supabaseService.currentTeacher!.id,
-              username: supabaseService.currentTeacher!.name,
-              password: supabaseService.currentTeacher!.password ?? '',
+              id: state.teacher!.id,
+              username: state.teacher!.name,
+              password: state.teacher!.password ?? '',
               type: 'teacher_admin',
-              teacherInitial: supabaseService.currentTeacher!.initial,
+              teacherInitial: state.teacher!.initial,
             ),
           );
         }
-        
-        // Otherwise show login screen
         return const UnifiedLoginScreen();
       },
     );

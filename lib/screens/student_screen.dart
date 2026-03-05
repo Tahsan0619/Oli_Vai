@@ -3,17 +3,14 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../services/data_repository.dart';
 import '../services/supabase_service.dart';
-import '../widgets/custom_search_bar.dart';
-import '../widgets/department_dropdown.dart';
-import '../widgets/online_badge.dart';
+import '../models/batch.dart';
+import '../utils/app_theme.dart';
 import '../widgets/schedule_card.dart';
-import '../widgets/animated_illustration.dart';
-import '../utils/date_utils.dart';
+import 'monthly_routine_screen.dart';
+import 'notification_screen.dart';
 
-/// Student screen for searching by batch
 class StudentScreen extends StatefulWidget {
   final DataRepository repo;
-
   const StudentScreen({super.key, required this.repo});
 
   @override
@@ -21,213 +18,348 @@ class StudentScreen extends StatefulWidget {
 }
 
 class _StudentScreenState extends State<StudentScreen> {
-  final _searchController = TextEditingController();
-  String _selectedDepartment = 'EdTE';
-  List _scheduleEntries = [];
-  bool _hasSearched = false;
-  String? _errorMessage;
+  String? _selectedBatchId;
+  String _selectedDay = _currentDay();
+  final _searchCtrl = TextEditingController();
 
-  void _searchSchedule() {
-    final batchQuery = _searchController.text.trim();
-    if (batchQuery.isEmpty) {
-      setState(() {
-        _errorMessage = 'Please enter a batch';
-        _hasSearched = false;
-      });
-      return;
-    }
+  static const _days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-    final day = todayAbbrev();
-    
-    // Try to find batch
-    dynamic batch;
-    for (var b in widget.repo.data!.batches) {
-      if (b.name.toLowerCase().contains(batchQuery.toLowerCase())) {
-        batch = b;
-        break;
-      }
-    }
-
-    if (batch == null) {
-      setState(() {
-        _errorMessage = 'Batch not found';
-        _hasSearched = true;
-        _scheduleEntries = [];
-      });
-      return;
-    }
-
-    final entries = widget.repo.batchEntriesForDay(batch.id, day);
-    
-    setState(() {
-      _scheduleEntries = entries;
-      _hasSearched = true;
-      _errorMessage = entries.isEmpty ? 'No classes today for ${batch.name}' : null;
-    });
+  static String _currentDay() {
+    const dayMap = {1: 'Mon', 2: 'Tue', 3: 'Wed', 4: 'Thu', 5: 'Fri', 6: 'Sat', 7: 'Sun'};
+    return dayMap[DateTime.now().weekday] ?? 'Sun';
   }
 
-  void _showSettingsMenu(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: const Color(0xFF1E1E1E),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) => Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.logout, color: Colors.white),
-              title: Text('Logout', style: GoogleFonts.poppins(color: Colors.white)),
-              onTap: () async {
-                Navigator.pop(context);
-                await context.read<SupabaseService>().logout();
-                if (context.mounted) {
-                  Navigator.pushReplacementNamed(context, '/');
-                }
-              },
-            ),
-          ],
-        ),
-      ),
-    );
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final batches = widget.repo.data?.batches ?? [];
+    final filtered = _searchCtrl.text.isEmpty
+        ? batches
+        : batches.where((b) =>
+            b.name.toLowerCase().contains(_searchCtrl.text.toLowerCase()) ||
+            b.id.toLowerCase().contains(_searchCtrl.text.toLowerCase())).toList();
+
     return Scaffold(
-      backgroundColor: const Color(0xFF121212),
-      body: SafeArea(
-        child: Column(
+      backgroundColor: AppTheme.scaffoldBg,
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 0,
+        scrolledUnderElevation: 0.5,
+        title: Row(
           children: [
-            // Top App Bar
-            Padding(
-              padding: const EdgeInsets.all(16.0),
+            Container(
+              width: 34,
+              height: 34,
+              decoration: BoxDecoration(
+                gradient: AppTheme.studentGradient,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(Icons.bolt_rounded, size: 18, color: Colors.white),
+            ),
+            const SizedBox(width: 10),
+            Text('Schedule', style: GoogleFonts.poppins(
+              fontSize: 18, fontWeight: FontWeight.w600, color: AppTheme.textPrimary,
+            )),
+          ],
+        ),
+        actions: [
+          Builder(
+            builder: (ctx) {
+              final svc = ctx.read<SupabaseService>();
+              final studentId = svc.currentStudent?.studentId ?? '';
+              if (studentId.isEmpty) return const SizedBox();
+              return NotificationBell(
+                recipientType: 'student',
+                recipientId: studentId,
+              );
+            },
+          ),
+          const SizedBox(width: 4),
+        ],
+      ),
+      body: Column(
+        children: [
+          // Search bar + batch selector
+          Container(
+            color: Colors.white,
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+            child: Column(
+              children: [
+                // Search field
+                TextField(
+                  controller: _searchCtrl,
+                  onChanged: (_) => setState(() {}),
+                  style: GoogleFonts.poppins(fontSize: 14, color: AppTheme.textPrimary),
+                  decoration: InputDecoration(
+                    hintText: 'Search batch (e.g. CSE 2024)',
+                    hintStyle: GoogleFonts.poppins(fontSize: 14, color: AppTheme.textHint),
+                    prefixIcon: const Icon(Icons.search, color: AppTheme.textHint, size: 20),
+                    filled: true,
+                    fillColor: AppTheme.inputFill,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(AppTheme.radiusM),
+                      borderSide: BorderSide.none,
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(AppTheme.radiusM),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
+                ),
+
+                // Batch pills (if not selected)
+                if (_selectedBatchId == null && filtered.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    height: 36,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: filtered.length,
+                      separatorBuilder: (_, __) => const SizedBox(width: 8),
+                      itemBuilder: (_, i) => _batchPill(filtered[i]),
+                    ),
+                  ),
+                ],
+
+                // Selected batch indicator
+                if (_selectedBatchId != null) ...[
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: AppTheme.primaryBlueLight,
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: AppTheme.primaryBlue.withValues(alpha: 0.3)),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              batches.firstWhere((b) => b.id == _selectedBatchId,
+                                orElse: () => Batch(id: '', name: _selectedBatchId!, session: '')).name,
+                              style: GoogleFonts.poppins(
+                                fontSize: 13, fontWeight: FontWeight.w600, color: AppTheme.primaryBlue,
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            GestureDetector(
+                              onTap: () => setState(() => _selectedBatchId = null),
+                              child: const Icon(Icons.close, size: 16, color: AppTheme.primaryBlue),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          ),
+
+          Divider(height: 1, color: AppTheme.dividerColor),
+
+          // Day selector + Monthly Routine button
+          if (_selectedBatchId != null) ...[
+            Container(
+              color: Colors.white,
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
               child: Row(
                 children: [
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF5B7CFF),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: const Icon(Icons.school, color: Colors.white, size: 28),
-                  ),
-                  const SizedBox(width: 12),
                   Expanded(
-                    child: Text(
-                      'Student',
-                      style: GoogleFonts.poppins(
-                        fontSize: 24,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.white,
+                    child: OutlinedButton.icon(
+                      onPressed: () {
+                        final batch = (widget.repo.data?.batches ?? []).firstWhere(
+                          (b) => b.id == _selectedBatchId,
+                          orElse: () => Batch(id: _selectedBatchId!, name: _selectedBatchId!, session: ''),
+                        );
+                        Navigator.push(context, MaterialPageRoute(
+                          builder: (_) => MonthlyRoutineScreen(
+                            repo: widget.repo,
+                            title: '${batch.name} — Monthly Routine',
+                            batchId: _selectedBatchId,
+                            showTeacher: true,
+                            showBatch: false,
+                          ),
+                        ));
+                      },
+                      icon: const Icon(Icons.calendar_month, size: 16),
+                      label: const Text('View Monthly Routine'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppTheme.primaryBlue,
+                        side: BorderSide(color: AppTheme.primaryBlue.withValues(alpha: 0.4)),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppTheme.radiusS)),
+                        padding: const EdgeInsets.symmetric(vertical: 10),
                       ),
                     ),
                   ),
-                  const Spacer(),
-                  const OnlineBadge(),
-                  const SizedBox(width: 12),
-                  IconButton(
-                    icon: const Icon(Icons.menu, color: Colors.white),
-                    onPressed: () => _showSettingsMenu(context),
-                  ),
                 ],
               ),
             ),
-            
-            // Search Section
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: CustomSearchBar(
-                      controller: _searchController,
-                      hintText: 'Enter Batch - 60_C',
-                      onSubmitted: (_) => _searchSchedule(),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  DepartmentDropdown(
-                    value: _selectedDepartment,
-                    onChanged: (value) => setState(() => _selectedDepartment = value!),
-                  ),
-                ],
+            Container(
+              color: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: SizedBox(
+                height: 64,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  itemCount: _days.length,
+                  separatorBuilder: (_, __) => const SizedBox(width: 8),
+                  itemBuilder: (_, i) => _dayPill(_days[i]),
+                ),
               ),
             ),
-            
-            const SizedBox(height: 24),
-            
-            // Content
-            Expanded(
-              child: _hasSearched
-                  ? _scheduleEntries.isEmpty
-                      ? Center(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(Icons.event_busy, size: 80, color: Colors.grey[700]),
-                              const SizedBox(height: 16),
-                              Text(
-                                _errorMessage ?? 'No schedule found',
-                                style: GoogleFonts.poppins(
-                                  fontSize: 16,
-                                  color: Colors.grey[600],
-                                ),
-                                textAlign: TextAlign.center,
-                              ),
-                            ],
-                          ),
-                        )
-                      : ListView.builder(
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                          itemCount: _scheduleEntries.length,
-                          itemBuilder: (context, index) {
-                            final entry = _scheduleEntries[index];
-                            return ScheduleCard(entry: entry, repo: widget.repo);
-                          },
-                        )
-                  : _buildEmptyState(),
-            ),
+            Divider(height: 1, color: AppTheme.dividerColor),
           ],
-        ),
-      ),
-    );
-  }
 
-  Widget _buildEmptyState() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const AnimatedIllustration(
-            icon: Icons.school,
-            primaryColor: Color(0xFF5B7CFF),
-            secondaryColor: Color(0xFF8A5BFF),
-            size: 250,
-          ),
-          const SizedBox(height: 24),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 32.0),
-            child: Text(
-              'Search for your batch to view your class schedule',
-              style: GoogleFonts.poppins(
-                fontSize: 16,
-                color: Colors.grey[600],
-              ),
-              textAlign: TextAlign.center,
-            ),
+          // Schedule list
+          Expanded(
+            child: _selectedBatchId == null
+                ? _emptyState()
+                : _scheduleList(),
           ),
         ],
       ),
     );
   }
 
-  @override
-  void dispose() {
-    _searchController.dispose();
-    super.dispose();
+  Widget _batchPill(Batch batch) {
+    return GestureDetector(
+      onTap: () => setState(() => _selectedBatchId = batch.id),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          color: AppTheme.inputFill,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: AppTheme.borderLight),
+        ),
+        child: Text(
+          batch.name,
+          style: GoogleFonts.poppins(
+            fontSize: 12, fontWeight: FontWeight.w500, color: AppTheme.textSecondary,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _dayPill(String day) {
+    final isSelected = _selectedDay == day;
+    // Get mock date number for visual
+    final now = DateTime.now();
+    final dayIndex = _days.indexOf(day);
+    final currentDayIndex = _days.indexOf(_currentDay());
+    final diff = dayIndex - currentDayIndex;
+    final date = now.add(Duration(days: diff));
+
+    return GestureDetector(
+      onTap: () => setState(() => _selectedDay = day),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        width: 52,
+        decoration: BoxDecoration(
+          color: isSelected ? AppTheme.primaryBlue : Colors.transparent,
+          borderRadius: BorderRadius.circular(AppTheme.radiusM),
+          border: isSelected ? null : Border.all(color: AppTheme.borderLight),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              day.toUpperCase(),
+              style: GoogleFonts.poppins(
+                fontSize: 11, fontWeight: FontWeight.w600,
+                color: isSelected ? Colors.white.withValues(alpha: 0.8) : AppTheme.textHint,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              '${date.day}',
+              style: GoogleFonts.poppins(
+                fontSize: 18, fontWeight: FontWeight.w700,
+                color: isSelected ? Colors.white : AppTheme.textPrimary,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _scheduleList() {
+    final entries = widget.repo.batchEntriesForDay(_selectedBatchId!, _selectedDay);
+
+    if (entries.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.event_busy_outlined, size: 48, color: AppTheme.textHint),
+            const SizedBox(height: 12),
+            Text('No classes on $_selectedDay', style: AppTheme.subtitle),
+          ],
+        ),
+      );
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.all(16),
+      itemCount: entries.length + 1,
+      itemBuilder: (_, i) {
+        if (i == 0) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 16),
+            child: Row(
+              children: [
+                Text(
+                  "Today's Schedule",
+                  style: GoogleFonts.poppins(
+                    fontSize: 16, fontWeight: FontWeight.w600, color: AppTheme.textPrimary,
+                  ),
+                ),
+                const Spacer(),
+                Text(
+                  '${entries.length} Sessions',
+                  style: GoogleFonts.poppins(
+                    fontSize: 13, color: AppTheme.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+        return ScheduleCard(
+          entry: entries[i - 1],
+          repo: widget.repo,
+          showTeacher: true,
+          showBatch: false,
+        );
+      },
+    );
+  }
+
+  Widget _emptyState() {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.school_outlined, size: 56, color: AppTheme.textHint.withValues(alpha: 0.5)),
+          const SizedBox(height: 16),
+          Text('Select a Batch', style: GoogleFonts.poppins(
+            fontSize: 18, fontWeight: FontWeight.w600, color: AppTheme.textSecondary,
+          )),
+          const SizedBox(height: 6),
+          Text('Search and select a batch to view schedule', style: AppTheme.caption),
+        ],
+      ),
+    );
   }
 }

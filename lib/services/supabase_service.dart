@@ -4,6 +4,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'dart:io';
 import '../models/admin.dart';
+import '../models/appointment.dart';
+import '../models/notification_model.dart';
 import '../models/teacher.dart';
 import '../models/batch.dart';
 import '../models/course.dart';
@@ -351,15 +353,7 @@ class SupabaseService extends ChangeNotifier {
           .order('name', ascending: true);
 
       _cachedTeachers = (response as List)
-          .map((json) => Teacher(
-                id: json['id'],
-                name: json['name'],
-                initial: json['initial'],
-                designation: json['designation'],
-                phone: json['phone'] ?? '',
-                email: json['email'] ?? '',
-                homeDepartment: json['home_department'],
-              ))
+          .map((json) => Teacher.fromJson(json))
           .toList();
 
       return _cachedTeachers!;
@@ -380,15 +374,7 @@ class SupabaseService extends ChangeNotifier {
 
       if (response == null) return null;
 
-      return Teacher(
-        id: response['id'],
-        name: response['name'],
-        initial: response['initial'],
-        designation: response['designation'],
-        phone: response['phone'] ?? '',
-        email: response['email'] ?? '',
-        homeDepartment: response['home_department'],
-      );
+      return Teacher.fromJson(response);
     } catch (e) {
       debugPrint('Error fetching teacher: $e');
       return null;
@@ -419,6 +405,7 @@ class SupabaseService extends ChangeNotifier {
   /// Update teacher
   Future<bool> updateTeacher(String id, Teacher teacher) async {
     try {
+      debugPrint('[SVC] updateTeacher($id): name=${teacher.name}, notif=${teacher.notificationsEnabled}, email=${teacher.emailEnabled}');
       await _client.from('teachers').update({
         'name': teacher.name,
         'initial': teacher.initial,
@@ -427,12 +414,13 @@ class SupabaseService extends ChangeNotifier {
         'email': teacher.email,
         'home_department': teacher.homeDepartment,
       }).eq('id', id);
-      
+      debugPrint('[SVC] updateTeacher($id): DB update done (only name/desig/phone/email/dept sent)');
       _cachedTeachers = null;
-      notifyListeners();
+      // NOTE: Do NOT call notifyListeners() here — it causes Consumer<SupabaseService> in main.dart
+      // to rebuild the entire widget tree, destroying the SuperAdminPortal and losing local state.
       return true;
     } catch (e) {
-      debugPrint('Error updating teacher: $e');
+      debugPrint('[SVC] Error updating teacher: $e');
       return false;
     }
   }
@@ -849,11 +837,7 @@ class SupabaseService extends ChangeNotifier {
           .order('name', ascending: true);
 
       _cachedStudents = (response as List)
-          .map((json) => Student(
-                studentId: json['student_id'],
-                name: json['name'],
-                batchId: json['batch_id'],
-              ))
+          .map((json) => Student.fromJson(json))
           .toList();
 
       return _cachedStudents!;
@@ -873,11 +857,7 @@ class SupabaseService extends ChangeNotifier {
           .order('name', ascending: true);
 
       return (response as List)
-          .map((json) => Student(
-                studentId: json['student_id'],
-                name: json['name'],
-                batchId: json['batch_id'],
-              ))
+          .map((json) => Student.fromJson(json))
           .toList();
     } catch (e) {
       debugPrint('Error fetching students by batch: $e');
@@ -938,16 +918,17 @@ class SupabaseService extends ChangeNotifier {
   /// Update student
   Future<bool> updateStudent(String studentId, Student student) async {
     try {
+      debugPrint('[SVC] updateStudent($studentId): name=${student.name}, notif=${student.notificationsEnabled}, email=${student.emailEnabled}');
       await _client.from('students').update({
         'name': student.name,
         'batch_id': student.batchId,
       }).eq('student_id', studentId);
-      
+      debugPrint('[SVC] updateStudent($studentId): DB update done (only name/batch_id sent)');
       _cachedStudents = null;
-      notifyListeners();
+      // NOTE: Do NOT call notifyListeners() here — same reason as updateTeacher.
       return true;
     } catch (e) {
-      debugPrint('Error updating student: $e');
+      debugPrint('[SVC] Error updating student: $e');
       return false;
     }
   }
@@ -1334,6 +1315,366 @@ class SupabaseService extends ChangeNotifier {
     } catch (e) {
       debugPrint('Error fetching analytics: $e');
       return {};
+    }
+  }
+
+  // =====================================================
+  // APPOINTMENT SYSTEM
+  // =====================================================
+
+  /// Create a new appointment request (student -> teacher)
+  Future<Appointment> createAppointment(Appointment appt) async {
+    try {
+      final response = await _client
+          .from('appointments')
+          .insert(appt.toInsertJson())
+          .select()
+          .single();
+      return Appointment.fromJson(response);
+    } catch (e) {
+      debugPrint('Error creating appointment: $e');
+      rethrow;
+    }
+  }
+
+  /// Get all appointments for a teacher (by initial)
+  Future<List<Appointment>> getTeacherAppointments(String teacherInitial) async {
+    try {
+      final response = await _client
+          .from('appointments')
+          .select()
+          .eq('teacher_initial', teacherInitial)
+          .order('date', ascending: true)
+          .order('time', ascending: true);
+      return (response as List).map((e) => Appointment.fromJson(e)).toList();
+    } catch (e) {
+      debugPrint('Error fetching teacher appointments: $e');
+      return [];
+    }
+  }
+
+  /// Get all appointments made by a student
+  Future<List<Appointment>> getStudentAppointments(String studentId) async {
+    try {
+      final response = await _client
+          .from('appointments')
+          .select()
+          .eq('student_id', studentId)
+          .order('date', ascending: true)
+          .order('time', ascending: true);
+      return (response as List).map((e) => Appointment.fromJson(e)).toList();
+    } catch (e) {
+      debugPrint('Error fetching student appointments: $e');
+      return [];
+    }
+  }
+
+  /// Accept or reject an appointment (teacher action)
+  Future<void> updateAppointmentStatus(
+      String appointmentId, String status, {String? remarks}) async {
+    try {
+      final data = <String, dynamic>{'status': status};
+      if (remarks != null) data['teacher_remarks'] = remarks;
+      await _client.from('appointments').update(data).eq('id', appointmentId);
+    } catch (e) {
+      debugPrint('Error updating appointment status: $e');
+      rethrow;
+    }
+  }
+
+  /// Delete an appointment
+  Future<void> deleteAppointment(String appointmentId) async {
+    try {
+      await _client.from('appointments').delete().eq('id', appointmentId);
+    } catch (e) {
+      debugPrint('Error deleting appointment: $e');
+      rethrow;
+    }
+  }
+
+  // =====================================================
+  // PERMISSION MANAGEMENT (Super Admin)
+  // =====================================================
+
+  /// Toggle notifications permission for a teacher
+  Future<void> setTeacherNotificationsEnabled(String teacherId, bool enabled) async {
+    try {
+      debugPrint('[SVC] setTeacherNotificationsEnabled($teacherId, $enabled)');
+      await _client.from('teachers').update({
+        'notifications_enabled': enabled,
+      }).eq('id', teacherId);
+      debugPrint('[SVC] setTeacherNotificationsEnabled: DB updated OK');
+      _cachedTeachers = null;
+    } catch (e) {
+      debugPrint('[SVC] Error setting teacher notifications: $e');
+      rethrow;
+    }
+  }
+
+  /// Toggle email permission for a teacher
+  Future<void> setTeacherEmailEnabled(String teacherId, bool enabled) async {
+    try {
+      debugPrint('[SVC] setTeacherEmailEnabled($teacherId, $enabled)');
+      await _client.from('teachers').update({
+        'email_enabled': enabled,
+      }).eq('id', teacherId);
+      debugPrint('[SVC] setTeacherEmailEnabled: DB updated OK');
+      _cachedTeachers = null;
+    } catch (e) {
+      debugPrint('[SVC] Error setting teacher email: $e');
+      rethrow;
+    }
+  }
+
+  /// Toggle notifications permission for a student
+  Future<void> setStudentNotificationsEnabled(String studentId, bool enabled) async {
+    try {
+      debugPrint('[SVC] setStudentNotificationsEnabled($studentId, $enabled)');
+      await _client.from('students').update({
+        'notifications_enabled': enabled,
+      }).eq('student_id', studentId);
+      debugPrint('[SVC] setStudentNotificationsEnabled: DB updated OK');
+      _cachedStudents = null;
+    } catch (e) {
+      debugPrint('[SVC] Error setting student notifications: $e');
+      rethrow;
+    }
+  }
+
+  /// Toggle email permission for a student
+  Future<void> setStudentEmailEnabled(String studentId, bool enabled) async {
+    try {
+      debugPrint('[SVC] setStudentEmailEnabled($studentId, $enabled)');
+      await _client.from('students').update({
+        'email_enabled': enabled,
+      }).eq('student_id', studentId);
+      debugPrint('[SVC] setStudentEmailEnabled: DB updated OK');
+      _cachedStudents = null;
+    } catch (e) {
+      debugPrint('[SVC] Error setting student email: $e');
+      rethrow;
+    }
+  }
+
+  /// Bulk-enable notifications for all students in a batch
+  Future<void> setBatchNotificationsEnabled(String batchId, bool enabled) async {
+    try {
+      await _client.from('students').update({
+        'notifications_enabled': enabled,
+      }).eq('batch_id', batchId);
+      _cachedStudents = null;
+    } catch (e) {
+      debugPrint('Error batch-updating notifications: $e');
+      rethrow;
+    }
+  }
+
+  /// Bulk-enable email for all students in a batch
+  Future<void> setBatchEmailEnabled(String batchId, bool enabled) async {
+    try {
+      await _client.from('students').update({
+        'email_enabled': enabled,
+      }).eq('batch_id', batchId);
+      _cachedStudents = null;
+    } catch (e) {
+      debugPrint('Error batch-updating email: $e');
+      rethrow;
+    }
+  }
+
+  // =====================================================
+  // IN-APP NOTIFICATIONS
+  // =====================================================
+
+  /// Get notifications for a specific recipient
+  Future<List<AppNotification>> getNotifications({
+    required String recipientType,
+    required String recipientId,
+    int limit = 50,
+  }) async {
+    try {
+      final response = await _client
+          .from('notifications')
+          .select()
+          .eq('recipient_type', recipientType)
+          .eq('recipient_id', recipientId)
+          .order('created_at', ascending: false)
+          .limit(limit);
+      return (response as List).map((e) => AppNotification.fromJson(e)).toList();
+    } catch (e) {
+      debugPrint('Error fetching notifications: $e');
+      return [];
+    }
+  }
+
+  /// Get unread notification count
+  Future<int> getUnreadNotificationCount({
+    required String recipientType,
+    required String recipientId,
+  }) async {
+    try {
+      final response = await _client
+          .from('notifications')
+          .select('id')
+          .eq('recipient_type', recipientType)
+          .eq('recipient_id', recipientId)
+          .eq('is_read', false);
+      return (response as List).length;
+    } catch (e) {
+      debugPrint('Error fetching unread count: $e');
+      return 0;
+    }
+  }
+
+  /// Mark a notification as read
+  Future<void> markNotificationRead(String notificationId) async {
+    try {
+      await _client
+          .from('notifications')
+          .update({'is_read': true})
+          .eq('id', notificationId);
+    } catch (e) {
+      debugPrint('Error marking notification read: $e');
+    }
+  }
+
+  /// Mark all notifications as read for a recipient
+  Future<void> markAllNotificationsRead({
+    required String recipientType,
+    required String recipientId,
+  }) async {
+    try {
+      await _client
+          .from('notifications')
+          .update({'is_read': true})
+          .eq('recipient_type', recipientType)
+          .eq('recipient_id', recipientId)
+          .eq('is_read', false);
+    } catch (e) {
+      debugPrint('Error marking all read: $e');
+    }
+  }
+
+  /// Create a notification manually (for appointment events, etc.)
+  Future<void> createNotification(AppNotification notification) async {
+    try {
+      await _client.from('notifications').insert(notification.toInsertJson());
+    } catch (e) {
+      debugPrint('Error creating notification: $e');
+    }
+  }
+
+  /// Subscribe to realtime notifications (returns a RealtimeChannel)
+  /// [channelSuffix] makes channel names unique so bell & screen don't conflict.
+  RealtimeChannel subscribeToNotifications({
+    required String recipientType,
+    required String recipientId,
+    required void Function(AppNotification) onNewNotification,
+    String channelSuffix = '',
+  }) {
+    final suffix = channelSuffix.isNotEmpty ? '_$channelSuffix' : '_${DateTime.now().millisecondsSinceEpoch}';
+    // Sanitise channel name — only allow alphanumerics, hyphens, underscores
+    final safeName = 'notifications_${recipientType}_$recipientId$suffix'
+        .replaceAll(RegExp(r'[^a-zA-Z0-9_\-]'), '_');
+    final channel = _client
+        .channel(safeName)
+        .onPostgresChanges(
+          event: PostgresChangeEvent.insert,
+          schema: 'public',
+          table: 'notifications',
+          // No server-side filter — trigger-inserted rows (used for super_admin)
+          // may not be delivered when a PostgresChangeFilter is applied.
+          // We filter client-side instead.
+          callback: (payload) {
+            try {
+              debugPrint('[REALTIME-NOTIF] INSERT on notifications for $recipientType');
+              final newRec = payload.newRecord;
+              if (newRec.isEmpty) {
+                // Trigger-inserted rows sometimes arrive with empty newRecord;
+                // treat as a signal to reload count from DB.
+                onNewNotification(AppNotification(
+                  id: '', type: '', title: '', body: '', createdAt: '',
+                  recipientType: recipientType, recipientId: recipientId,
+                ));
+                return;
+              }
+              final notif = AppNotification.fromJson(newRec);
+              // Filter client-side by recipientType and recipientId
+              if (notif.recipientType == recipientType &&
+                  notif.recipientId == recipientId) {
+                onNewNotification(notif);
+              }
+            } catch (e) {
+              debugPrint('Error processing realtime notification: $e');
+              // On parse failure, still signal so the bell can reload count
+              onNewNotification(AppNotification(
+                id: '', type: '', title: '', body: '', createdAt: '',
+                recipientType: recipientType, recipientId: recipientId,
+              ));
+            }
+          },
+        )
+        .subscribe((status, [err]) {
+          debugPrint('[REALTIME-NOTIF] Channel $safeName status: $status ${err ?? ""}');
+        });
+    return channel;
+  }
+
+  /// Unsubscribe from realtime channel
+  Future<void> unsubscribeChannel(RealtimeChannel channel) async {
+    await _client.removeChannel(channel);
+  }
+
+  /// Invoke Supabase Edge Function to send email
+  Future<void> invokeEmailFunction({
+    required String functionName,
+    required Map<String, dynamic> body,
+  }) async {
+    try {
+      debugPrint('[EMAIL] >>> Invoking edge function: $functionName');
+      debugPrint('[EMAIL] >>> Payload: $body');
+      final response = await _client.functions.invoke(
+        functionName,
+        body: body,
+      );
+      debugPrint('[EMAIL] <<< Response status: ${response.status}');
+      debugPrint('[EMAIL] <<< Response data: ${response.data}');
+    } on FunctionException catch (e) {
+      debugPrint('[EMAIL] !!! FunctionException invoking $functionName');
+      debugPrint('[EMAIL] !!! Status: ${e.status}');
+      debugPrint('[EMAIL] !!! Details: ${e.details}');
+      debugPrint('[EMAIL] !!! reasonPhrase: ${e.reasonPhrase}');
+    } catch (e, stack) {
+      debugPrint('[EMAIL] !!! Error invoking edge function $functionName: $e');
+      debugPrint('[EMAIL] !!! Stack: $stack');
+    }
+  }
+
+  /// Trigger email notification for a timetable change
+  /// This calls the Edge Function which uses Brevo to send emails
+  Future<void> sendTimetableChangeEmail({
+    required String changeType,
+    required String courseCode,
+    required String teacherInitial,
+    required String batchId,
+    required String details,
+  }) async {
+    debugPrint('[EMAIL] sendTimetableChangeEmail called: type=$changeType, course=$courseCode, teacher=$teacherInitial, batch=$batchId');
+    try {
+      await invokeEmailFunction(
+        functionName: 'send-notification-email',
+        body: {
+          'change_type': changeType,
+          'course_code': courseCode,
+          'teacher_initial': teacherInitial,
+          'batch_id': batchId,
+          'details': details,
+        },
+      );
+      debugPrint('[EMAIL] sendTimetableChangeEmail completed successfully');
+    } catch (e, stack) {
+      debugPrint('[EMAIL] !!! sendTimetableChangeEmail FAILED: $e');
+      debugPrint('[EMAIL] !!! Stack: $stack');
     }
   }
 }

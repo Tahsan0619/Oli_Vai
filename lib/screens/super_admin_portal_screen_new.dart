@@ -1,22 +1,24 @@
+import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
-import 'package:pdf/pdf.dart';
-import 'package:pdf/widgets.dart' as pw;
-import 'package:printing/printing.dart';
-import 'package:file_picker/file_picker.dart';
-import 'dart:convert';
-import 'dart:io';
-import '../services/supabase_service.dart';
-import '../models/admin.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/batch.dart';
-import '../models/student.dart';
-import '../models/teacher.dart';
 import '../models/course.dart';
 import '../models/room.dart';
+import '../models/student.dart';
+import '../models/teacher.dart';
 import '../models/timetable_entry.dart';
+import '../services/data_repository.dart';
+import '../services/supabase_service.dart';
+import '../utils/app_theme.dart';
+import '../utils/timetable_export_import.dart';
+import '../models/notification_model.dart';
+import 'add_edit_schedule_screen.dart';
+import 'notification_screen.dart';
 
-/// Super Admin Portal with comprehensive management features
 class SuperAdminPortalScreenNew extends StatefulWidget {
   const SuperAdminPortalScreenNew({super.key});
 
@@ -24,4036 +26,1669 @@ class SuperAdminPortalScreenNew extends StatefulWidget {
   State<SuperAdminPortalScreenNew> createState() => _SuperAdminPortalScreenNewState();
 }
 
-class _SuperAdminPortalScreenNewState extends State<SuperAdminPortalScreenNew> {
-  int _selectedIndex = 0;
+class _SuperAdminPortalScreenNewState extends State<SuperAdminPortalScreenNew>
+    with SingleTickerProviderStateMixin {
+  late TabController _tabCtrl;
+  late DataRepository _repo;
+  bool _isLoading = true;
+  final List<RealtimeChannel> _channels = [];
+  Timer? _debounce;
 
-  final List<String> _tabTitles = [
-    'Dashboard',
-    'Batches',
-    'Students',
-    'Teachers',
-    'Timetable',
-    'Analytics',
-  ];
+  @override
+  void initState() {
+    super.initState();
+    _tabCtrl = TabController(length: 4, vsync: this);
+    _loadData();
+  }
 
-  void _logout() async {
-    await context.read<SupabaseService>().logout();
-    if (context.mounted) {
-      Navigator.of(context).pushReplacementNamed('/');
+  @override
+  void dispose() {
+    _tabCtrl.dispose();
+    _debounce?.cancel();
+    // Unsubscribe from all realtime channels
+    for (final ch in _channels) {
+      Supabase.instance.client.removeChannel(ch);
     }
+    super.dispose();
+  }
+
+  Future<void> _loadData() async {
+    final svc = context.read<SupabaseService>();
+    _repo = DataRepository(svc);
+    await _repo.load();
+    if (mounted) {
+      setState(() => _isLoading = false);
+      _subscribeRealtime();
+    }
+  }
+
+  /// Subscribe to realtime changes on key tables.
+  /// When any row is inserted/updated/deleted, silently reload data.
+  void _subscribeRealtime() {
+    final client = Supabase.instance.client;
+    final tables = ['teachers', 'students', 'courses', 'rooms', 'batches', 'timetable_entries'];
+    for (final table in tables) {
+      final channel = client
+          .channel('superadmin_$table')
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: table,
+            callback: (payload) {
+              debugPrint('[REALTIME] Change on $table: ${payload.eventType}');
+              _debouncedRefresh();
+            },
+          )
+          .subscribe();
+      _channels.add(channel);
+    }
+  }
+
+  /// Debounced refresh — prevents rapid-fire reloads when multiple events arrive.
+  void _debouncedRefresh() {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 500), () => _refresh());
+  }
+
+  Future<void> _refresh() async {
+    // Silent refresh — do NOT set _isLoading = true.
+    // Setting _isLoading = true replaces TabBarView with a spinner,
+    // destroying all child widget state (permission toggles, search, etc.).
+    await _repo.load();
+    if (mounted) setState(() {});
   }
 
   @override
   Widget build(BuildContext context) {
-    final service = context.watch<SupabaseService>();
-    final admin = service.currentAdmin;
-
-    // If logged out, return to login
-    if (admin == null) {
-      return const Scaffold(
-        body: Center(
-          child: CircularProgressIndicator(),
-        ),
-      );
-    }
-
     return Scaffold(
-      backgroundColor: const Color(0xFF121212),
-      body: SafeArea(
-        child: Column(
+      backgroundColor: AppTheme.scaffoldBg,
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 0,
+        scrolledUnderElevation: 0.5,
+        title: Text('Super Admin', style: GoogleFonts.poppins(
+          fontSize: 18, fontWeight: FontWeight.w600, color: AppTheme.textPrimary,
+        )),
+        actions: [
+          Builder(
+            builder: (ctx) {
+              final svc = ctx.read<SupabaseService>();
+              final adminEmail = svc.currentAdmin?.username ?? '';
+              return NotificationBell(
+                recipientType: 'super_admin',
+                recipientId: adminEmail,
+              );
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.refresh_rounded, size: 22),
+            onPressed: _refresh,
+            tooltip: 'Refresh Data',
+          ),
+          IconButton(
+            icon: const Icon(Icons.logout_rounded, size: 22),
+            onPressed: () => _confirmLogout(),
+            tooltip: 'Logout',
+          ),
+          const SizedBox(width: 4),
+        ],
+        bottom: TabBar(
+          controller: _tabCtrl,
+          isScrollable: false,
+          labelColor: AppTheme.primaryBlue,
+          unselectedLabelColor: AppTheme.textSecondary,
+          indicatorColor: AppTheme.primaryBlue,
+          indicatorWeight: 2.5,
+          labelPadding: EdgeInsets.zero,
+          labelStyle: GoogleFonts.poppins(fontSize: 12.5, fontWeight: FontWeight.w600),
+          unselectedLabelStyle: GoogleFonts.poppins(fontSize: 12.5, fontWeight: FontWeight.w500),
+          tabs: const [
+            Tab(icon: Icon(Icons.dashboard_outlined, size: 18), text: 'Dashboard'),
+            Tab(icon: Icon(Icons.people_outline, size: 18), text: 'Users'),
+            Tab(icon: Icon(Icons.calendar_month_outlined, size: 18), text: 'Timetable'),
+            Tab(icon: Icon(Icons.school_outlined, size: 18), text: 'Academic'),
+          ],
+        ),
+      ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator(color: AppTheme.primaryBlue))
+          : TabBarView(
+              controller: _tabCtrl,
+              children: [
+                _DashboardTab(repo: _repo, onNavigate: (i) => _tabCtrl.animateTo(i)),
+                _UsersTab(repo: _repo, svc: context.read<SupabaseService>(), onRefresh: _refresh),
+                _TimetableTab(repo: _repo, svc: context.read<SupabaseService>(), onRefresh: _refresh),
+                _AcademicTab(repo: _repo, svc: context.read<SupabaseService>(), onRefresh: _refresh),
+              ],
+            ),
+    );
+  }
+
+  void _confirmLogout() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppTheme.radiusL)),
+        title: Text('Logout', style: AppTheme.heading3),
+        content: Text('Are you sure you want to sign out?', style: AppTheme.body),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.errorRed),
+            onPressed: () {
+              Navigator.pop(ctx);
+              context.read<SupabaseService>().logout();
+              Navigator.of(context).pushNamedAndRemoveUntil('/', (_) => false);
+            },
+            child: const Text('Logout'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ───────── DASHBOARD TAB ─────────
+class _DashboardTab extends StatelessWidget {
+  final DataRepository repo;
+  final void Function(int) onNavigate;
+  const _DashboardTab({required this.repo, required this.onNavigate});
+
+  @override
+  Widget build(BuildContext context) {
+    final data = repo.data!;
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        // Welcome
+        Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [AppTheme.primaryBlue, Color(0xFF6366F1)],
+              begin: Alignment.topLeft, end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(AppTheme.radiusL),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Welcome, Super Admin', style: GoogleFonts.poppins(
+                fontSize: 20, fontWeight: FontWeight.w600, color: Colors.white,
+              )),
+              const SizedBox(height: 6),
+              Text(data.meta.department, style: GoogleFonts.poppins(
+                fontSize: 12.5, color: Colors.white.withValues(alpha: 0.85),
+              )),
+              Text(data.meta.university, style: GoogleFonts.poppins(
+                fontSize: 11.5, color: Colors.white.withValues(alpha: 0.7),
+              )),
+            ],
+          ),
+        ),
+
+        const SizedBox(height: 20),
+        AppTheme.sectionHeader('System Metrics', icon: Icons.analytics_outlined),
+        const SizedBox(height: 12),
+
+        // Stats grid
+        Row(
           children: [
-            // Header
-            _buildHeader(admin),
-            
-            // Tab Bar
-            _buildTabBar(),
-            
-            // Content
+            _MetricCard(label: 'Teachers', value: '${data.teachers.length}',
+              icon: Icons.school_outlined, color: AppTheme.primaryBlue),
+            const SizedBox(width: 12),
+            _MetricCard(label: 'Students', value: '${data.students.length}',
+              icon: Icons.people_outline, color: AppTheme.successGreen),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            _MetricCard(label: 'Courses', value: '${data.courses.length}',
+              icon: Icons.menu_book_outlined, color: AppTheme.warningAmber),
+            const SizedBox(width: 12),
+            _MetricCard(label: 'Rooms', value: '${data.rooms.length}',
+              icon: Icons.meeting_room_outlined, color: AppTheme.infoCyan),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            _MetricCard(label: 'Batches', value: '${data.batches.length}',
+              icon: Icons.group_work_outlined, color: const Color(0xFF8B5CF6)),
+            const SizedBox(width: 12),
+            _MetricCard(label: 'Schedule Entries', value: '${data.timetable.length}',
+              icon: Icons.calendar_today_outlined, color: const Color(0xFFEC4899)),
+          ],
+        ),
+
+        const SizedBox(height: 24),
+        AppTheme.sectionHeader('Quick Actions', icon: Icons.flash_on_outlined),
+        const SizedBox(height: 12),
+
+        _QuickAction(icon: Icons.person_add_outlined, label: 'Manage Users',
+          onTap: () => onNavigate(1)),
+        const SizedBox(height: 8),
+        _QuickAction(icon: Icons.edit_calendar_outlined, label: 'Manage Timetable',
+          onTap: () => onNavigate(2)),
+        const SizedBox(height: 8),
+        _QuickAction(icon: Icons.school_outlined, label: 'Manage Academic',
+          onTap: () => onNavigate(3)),
+
+        const SizedBox(height: 32),
+      ],
+    );
+  }
+}
+
+class _MetricCard extends StatelessWidget {
+  final String label, value;
+  final IconData icon;
+  final Color color;
+  const _MetricCard({required this.label, required this.value, required this.icon, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: AppTheme.cleanCardDecoration,
+        child: Row(
+          children: [
+            Container(
+              width: 42, height: 42,
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(AppTheme.radiusM),
+              ),
+              child: Icon(icon, color: color, size: 22),
+            ),
+            const SizedBox(width: 12),
             Expanded(
-              child: _buildContent(),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(value, style: GoogleFonts.poppins(
+                    fontSize: 22, fontWeight: FontWeight.w700, color: AppTheme.textPrimary,
+                  )),
+                  Text(label, style: AppTheme.caption),
+                ],
+              ),
             ),
           ],
         ),
       ),
     );
   }
-
-  Widget _buildHeader(Admin? admin) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: const BoxDecoration(
-        color: Color(0xFF1E1E1E),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black26,
-            blurRadius: 4,
-            offset: Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                colors: [Color(0xFF5B7CFF), Color(0xFF8A5BFF)],
-              ),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: const Icon(
-              Icons.admin_panel_settings,
-              color: Colors.white,
-              size: 28,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Super Admin Portal',
-                  style: GoogleFonts.poppins(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.white,
-                  ),
-                ),
-                Text(
-                  admin?.username ?? 'Admin',
-                  style: GoogleFonts.poppins(
-                    fontSize: 12,
-                    color: Colors.grey[400],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          IconButton(
-            icon: const Icon(Icons.logout, color: Colors.white),
-            onPressed: _logout,
-            tooltip: 'Logout',
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildTabBar() {
-    return Container(
-      height: 60,
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-      decoration: const BoxDecoration(
-        color: Color(0xFF1E1E1E),
-      ),
-      child: ListView.builder(
-        scrollDirection: Axis.horizontal,
-        itemCount: _tabTitles.length,
-        itemBuilder: (context, index) {
-          final isSelected = _selectedIndex == index;
-          return Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            child: Material(
-              color: Colors.transparent,
-              child: InkWell(
-                onTap: () => setState(() => _selectedIndex = index),
-                borderRadius: BorderRadius.circular(8),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: isSelected 
-                        ? const Color(0xFF5B7CFF) 
-                        : Colors.transparent,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                      color: isSelected
-                          ? Colors.transparent
-                          : Colors.grey[700]!,
-                    ),
-                  ),
-                  child: Center(
-                    child: Text(
-                      _tabTitles[index],
-                      style: GoogleFonts.poppins(
-                        color: isSelected ? Colors.white : Colors.grey[400],
-                        fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-                        fontSize: 14,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _buildContent() {
-    switch (_selectedIndex) {
-      case 0:
-        return _DashboardTab();
-      case 1:
-        return _BatchesTab();
-      case 2:
-        return _StudentsTab();
-      case 3:
-        return _TeachersTab();
-      case 4:
-        return _TimetableTab();
-      case 5:
-        return _AnalyticsTab();
-      default:
-        return const Center(child: Text('Coming soon'));
-    }
-  }
 }
 
-// =====================================================
-// DASHBOARD TAB
-// =====================================================
-class _DashboardTab extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    final service = context.read<SupabaseService>();
-    // Get the parent state to access _selectedIndex
-    final parentState = context.findAncestorStateOfType<_SuperAdminPortalScreenNewState>();
-
-    return FutureBuilder(
-      future: Future.wait([
-        service.getBatches(),
-        service.getStudents(),
-        service.getTeachers(),
-        service.getAllTimetableEntries(),
-      ]),
-      builder: (context, AsyncSnapshot<List<dynamic>> snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
-
-        if (snapshot.hasError) {
-          return Center(
-            child: Text(
-              'Error: ${snapshot.error}',
-              style: GoogleFonts.poppins(color: Colors.red),
-            ),
-          );
-        }
-
-        final batches = snapshot.data![0] as List;
-        final students = snapshot.data![1] as List;
-        final teachers = snapshot.data![2] as List;
-        final timetable = snapshot.data![3] as List;
-
-        return SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                'System Overview',
-                style: GoogleFonts.poppins(
-                  fontSize: 24,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.white,
-                ),
-              ),
-              const SizedBox(height: 20),
-              
-              // Stats Cards
-              Row(
-                children: [
-                  Expanded(
-                    child: _StatCard(
-                      title: 'Batches',
-                      value: batches.length.toString(),
-                      icon: Icons.group_work,
-                      color: const Color(0xFF5B7CFF),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _StatCard(
-                      title: 'Students',
-                      value: students.length.toString(),
-                      icon: Icons.school,
-                      color: const Color(0xFF8A5BFF),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: _StatCard(
-                      title: 'Teachers',
-                      value: teachers.length.toString(),
-                      icon: Icons.person,
-                      color: const Color(0xFFFF6B6B),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _StatCard(
-                      title: 'Classes',
-                      value: timetable.length.toString(),
-                      icon: Icons.calendar_today,
-                      color: const Color(0xFF4ECDC4),
-                    ),
-                  ),
-                ],
-              ),
-
-              const SizedBox(height: 24),
-
-              // Quick Actions
-              Text(
-                'Quick Actions',
-                style: GoogleFonts.poppins(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.white,
-                ),
-              ),
-              const SizedBox(height: 12),
-
-              _QuickActionCard(
-                title: 'Manage Batches',
-                subtitle: 'Add, edit, or remove batches',
-                icon: Icons.group_work,
-                onTap: () {
-                  // Switch to batches tab
-                  parentState?.setState(() {
-                    parentState._selectedIndex = 1;
-                  });
-                },
-              ),
-              const SizedBox(height: 8),
-              _QuickActionCard(
-                title: 'Manage Students',
-                subtitle: 'Add students to batches',
-                icon: Icons.school,
-                onTap: () {
-                  // Switch to students tab
-                  parentState?.setState(() {
-                    parentState._selectedIndex = 2;
-                  });
-                },
-              ),
-              const SizedBox(height: 8),
-              _QuickActionCard(
-                title: 'Manage Teachers',
-                subtitle: 'View and manage teachers',
-                icon: Icons.person,
-                onTap: () {
-                  // Switch to teachers tab
-                  parentState?.setState(() {
-                    parentState._selectedIndex = 3;
-                  });
-                },
-              ),
-              const SizedBox(height: 8),
-              _QuickActionCard(
-                title: 'Manage Timetable',
-                subtitle: 'Create and modify schedules',
-                icon: Icons.calendar_month,
-                onTap: () {
-                  // Switch to timetable tab
-                  parentState?.setState(() {
-                    parentState._selectedIndex = 4;
-                  });
-                },
-              ),
-              const SizedBox(height: 8),
-              _QuickActionCard(
-                title: 'View Analytics',
-                subtitle: 'View system statistics and insights',
-                icon: Icons.analytics,
-                onTap: () {
-                  // Switch to analytics tab
-                  parentState?.setState(() {
-                    parentState._selectedIndex = 5;
-                  });
-                },
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-}
-
-class _StatCard extends StatelessWidget {
-  final String title;
-  final String value;
+class _QuickAction extends StatelessWidget {
   final IconData icon;
-  final Color color;
-
-  const _StatCard({
-    required this.title,
-    required this.value,
-    required this.icon,
-    required this.color,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1E1E1E),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: color.withOpacity(0.3)),
-      ),
-      child: Column(
-        children: [
-          Icon(icon, color: color, size: 32),
-          const SizedBox(height: 12),
-          Text(
-            value,
-            style: GoogleFonts.poppins(
-              fontSize: 32,
-              fontWeight: FontWeight.w700,
-              color: Colors.white,
-            ),
-          ),
-          Text(
-            title,
-            style: GoogleFonts.poppins(
-              fontSize: 14,
-              color: Colors.grey[400],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _QuickActionCard extends StatelessWidget {
-  final String title;
-  final String subtitle;
-  final IconData icon;
+  final String label;
   final VoidCallback onTap;
-
-  const _QuickActionCard({
-    required this.title,
-    required this.subtitle,
-    required this.icon,
-    required this.onTap,
-  });
+  const _QuickAction({required this.icon, required this.label, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
-        child: Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: const Color(0xFF1E1E1E),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF5B7CFF).withOpacity(0.2),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Icon(icon, color: const Color(0xFF5B7CFF)),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: GoogleFonts.poppins(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.white,
-                      ),
-                    ),
-                    Text(
-                      subtitle,
-                      style: GoogleFonts.poppins(
-                        fontSize: 12,
-                        color: Colors.grey[400],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const Icon(Icons.chevron_right, color: Colors.grey),
-            ],
-          ),
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(AppTheme.radiusM),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: AppTheme.cleanCardDecoration,
+        child: Row(
+          children: [
+            Icon(icon, color: AppTheme.primaryBlue, size: 22),
+            const SizedBox(width: 14),
+            Expanded(child: Text(label, style: AppTheme.bodyMedium)),
+            const Icon(Icons.chevron_right_rounded, color: AppTheme.textHint),
+          ],
         ),
       ),
     );
   }
 }
 
-// =====================================================
-// BATCHES TAB
-// =====================================================
-class _BatchesTab extends StatefulWidget {
+// ───────── USERS TAB ─────────
+class _UsersTab extends StatefulWidget {
+  final DataRepository repo;
+  final SupabaseService svc;
+  final VoidCallback onRefresh;
+  const _UsersTab({required this.repo, required this.svc, required this.onRefresh});
+
   @override
-  State<_BatchesTab> createState() => _BatchesTabState();
+  State<_UsersTab> createState() => _UsersTabState();
 }
 
-class _BatchesTabState extends State<_BatchesTab> {
+class _UsersTabState extends State<_UsersTab> {
+  int _section = 0; // 0=teachers, 1=students, 2=batches
+  String _search = '';
+
   @override
   Widget build(BuildContext context) {
-    final service = context.watch<SupabaseService>();
-
     return Column(
       children: [
-        // Header with Add Button
-        Container(
-          padding: const EdgeInsets.all(16),
+        // Section pills
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
           child: Row(
             children: [
-              Text(
-                'Manage Batches',
-                style: GoogleFonts.poppins(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.white,
-                ),
-              ),
-              const Spacer(),
-              ElevatedButton.icon(
-                onPressed: () => _showAddBatchDialog(context),
-                icon: const Icon(Icons.add),
-                label: const Text('Add Batch'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF5B7CFF),
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                ),
-              ),
+              _SectionPill(label: 'Teachers', isActive: _section == 0, onTap: () => setState(() => _section = 0)),
+              const SizedBox(width: 8),
+              _SectionPill(label: 'Students', isActive: _section == 1, onTap: () => setState(() => _section = 1)),
+              const SizedBox(width: 8),
+              _SectionPill(label: 'Batches', isActive: _section == 2, onTap: () => setState(() => _section = 2)),
             ],
           ),
         ),
-
-        // Batches List
-        Expanded(
-          child: FutureBuilder<List<Batch>>(
-            future: service.getBatches(forceRefresh: true),
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Center(child: CircularProgressIndicator());
-              }
-
-              if (snapshot.hasError) {
-                return Center(
-                  child: Text(
-                    'Error: ${snapshot.error}',
-                    style: GoogleFonts.poppins(color: Colors.red),
-                  ),
-                );
-              }
-
-              final batches = snapshot.data ?? [];
-
-              if (batches.isEmpty) {
-                return Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(Icons.group_work, size: 64, color: Colors.grey),
-                      const SizedBox(height: 16),
-                      Text(
-                        'No batches found',
-                        style: GoogleFonts.poppins(
-                          fontSize: 18,
-                          color: Colors.grey,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      TextButton(
-                        onPressed: () => _showAddBatchDialog(context),
-                        child: const Text('Add Your First Batch'),
-                      ),
-                    ],
-                  ),
-                );
-              }
-
-              return ListView.builder(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                itemCount: batches.length,
-                itemBuilder: (context, index) {
-                  final batch = batches[index];
-                  return _BatchCard(
-                    batch: batch,
-                    onEdit: () => _showEditBatchDialog(context, batch),
-                    onDelete: () => _deleteBatch(context, batch),
-                  );
-                },
-              );
-            },
+        // Search
+        Padding(
+          padding: const EdgeInsets.all(16),
+          child: TextField(
+            onChanged: (v) => setState(() => _search = v.toLowerCase()),
+            decoration: AppTheme.inputDecoration(
+              label: 'Search...',
+              prefixIcon: Icons.search_rounded,
+            ),
+            style: GoogleFonts.poppins(fontSize: 14),
           ),
+        ),
+        Expanded(
+          child: _section == 0
+              ? _buildTeacherList()
+              : _section == 1
+                  ? _buildStudentList()
+                  : _buildBatchList(),
         ),
       ],
     );
   }
 
-  void _showAddBatchDialog(BuildContext context) {
-    final nameController = TextEditingController();
-    final sessionController = TextEditingController();
+  Widget _buildTeacherList() {
+    final data = widget.repo.data!;
+    final filtered = data.teachers.where((t) =>
+      t.name.toLowerCase().contains(_search) ||
+      t.initial.toLowerCase().contains(_search) ||
+      t.email.toLowerCase().contains(_search)).toList();
 
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1E1E1E),
-        title: Text(
-          'Add New Batch',
-          style: GoogleFonts.poppins(color: Colors.white),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: nameController,
-              style: GoogleFonts.poppins(color: Colors.white),
-              decoration: const InputDecoration(
-                labelText: 'Batch Name',
-                hintText: 'e.g., CSE-A',
-              ),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: sessionController,
-              style: GoogleFonts.poppins(color: Colors.white),
-              decoration: const InputDecoration(
-                labelText: 'Session',
-                hintText: 'e.g., 2024-2025',
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              final name = nameController.text.trim();
-              final session = sessionController.text.trim();
-
-              if (name.isEmpty || session.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Please fill all fields')),
-                );
-                return;
-              }
-
-              final service = context.read<SupabaseService>();
-              final batch = Batch(id: '', name: name, session: session);
-              final success = await service.addBatch(batch);
-
-              if (context.mounted) {
-                Navigator.pop(context);
-                if (success != null) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Batch added successfully')),
-                  );
-                  setState(() {});
-                } else {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Failed to add batch')),
-                  );
-                }
-              }
-            },
-            child: const Text('Add'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showEditBatchDialog(BuildContext context, Batch batch) {
-    final nameController = TextEditingController(text: batch.name);
-    final sessionController = TextEditingController(text: batch.session);
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1E1E1E),
-        title: Text(
-          'Edit Batch',
-          style: GoogleFonts.poppins(color: Colors.white),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: nameController,
-              style: GoogleFonts.poppins(color: Colors.white),
-              decoration: const InputDecoration(labelText: 'Batch Name'),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: sessionController,
-              style: GoogleFonts.poppins(color: Colors.white),
-              decoration: const InputDecoration(labelText: 'Session'),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              final updatedBatch = Batch(
-                id: batch.id,
-                name: nameController.text.trim(),
-                session: sessionController.text.trim(),
-              );
-
-              final service = context.read<SupabaseService>();
-              final success = await service.updateBatch(batch.id, updatedBatch);
-
-              if (context.mounted) {
-                Navigator.pop(context);
-                if (success) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Batch updated successfully')),
-                  );
-                  setState(() {});
-                } else {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Failed to update batch')),
-                  );
-                }
-              }
-            },
-            child: const Text('Update'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _deleteBatch(BuildContext context, Batch batch) async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1E1E1E),
-        title: Text('Delete Batch?', style: GoogleFonts.poppins(color: Colors.white)),
-        content: Text(
-          'Are you sure you want to delete ${batch.name}?',
-          style: GoogleFonts.poppins(color: Colors.white70),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirm == true && context.mounted) {
-      final service = context.read<SupabaseService>();
-      final success = await service.deleteBatch(batch.id);
-
-      if (context.mounted) {
-        if (success) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Batch deleted successfully')),
-          );
-          setState(() {});
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Failed to delete batch')),
-          );
-        }
-      }
-    }
-  }
-}
-
-class _BatchCard extends StatelessWidget {
-  final Batch batch;
-  final VoidCallback onEdit;
-  final VoidCallback onDelete;
-
-  const _BatchCard({
-    required this.batch,
-    required this.onEdit,
-    required this.onDelete,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      child: ListTile(
-        leading: Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: const Color(0xFF5B7CFF).withOpacity(0.2),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: const Icon(Icons.group_work, color: Color(0xFF5B7CFF)),
-        ),
-        title: Text(
-          batch.name,
-          style: GoogleFonts.poppins(
-            fontWeight: FontWeight.w600,
-            color: Colors.white,
-          ),
-        ),
-        subtitle: Text(
-          batch.session,
-          style: GoogleFonts.poppins(color: Colors.grey[400]),
-        ),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            IconButton(
-              icon: const Icon(Icons.edit, color: Color(0xFF5B7CFF)),
-              onPressed: onEdit,
-            ),
-            IconButton(
-              icon: const Icon(Icons.delete, color: Colors.red),
-              onPressed: onDelete,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// =====================================================
-// STUDENTS TAB
-// =====================================================
-class _StudentsTab extends StatefulWidget {
-  @override
-  State<_StudentsTab> createState() => _StudentsTabState();
-}
-
-class _StudentsTabState extends State<_StudentsTab> {
-  String? _selectedBatchId;
-
-  @override
-  Widget build(BuildContext context) {
-    final service = context.watch<SupabaseService>();
-
-    return Column(
+    return Stack(
       children: [
-        // Header
-        Container(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              Text(
-                'Manage Students',
-                style: GoogleFonts.poppins(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.white,
-                ),
-              ),
-              const Spacer(),
-              ElevatedButton.icon(
-                onPressed: () => _showAddStudentDialog(context),
-                icon: const Icon(Icons.add),
-                label: const Text('Add Student'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF5B7CFF),
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                ),
-              ),
-            ],
-          ),
-        ),
-
-        // Batch Filter
-        FutureBuilder<List<Batch>>(
-          future: service.getBatches(),
-          builder: (context, snapshot) {
-            if (!snapshot.hasData) return const SizedBox();
-
-            final batches = snapshot.data!;
+        ListView.builder(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 80),
+          itemCount: filtered.length,
+          itemBuilder: (ctx, i) {
+            final t = filtered[i];
             return Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: DropdownButtonFormField<String>(
-                value: _selectedBatchId,
-                decoration: InputDecoration(
-                  labelText: 'Filter by Batch',
-                  labelStyle: GoogleFonts.poppins(color: Colors.grey[400]),
-                ),
-                dropdownColor: const Color(0xFF2A2A2A),
-                items: [
-                  DropdownMenuItem<String>(
-                    value: null,
-                    child: Text(
-                      'All Batches',
-                      style: GoogleFonts.poppins(color: Colors.white),
+              margin: const EdgeInsets.only(bottom: 8),
+              decoration: AppTheme.cleanCardDecoration,
+              child: Column(
+                children: [
+                  ListTile(
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                    leading: CircleAvatar(
+                      backgroundColor: AppTheme.primaryBlueLight,
+                      backgroundImage: t.profilePic != null ? NetworkImage(t.profilePic!) : null,
+                      child: t.profilePic == null ? Text(t.initial.substring(0, t.initial.length > 2 ? 2 : t.initial.length),
+                        style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.primaryBlue)) : null,
+                    ),
+                    title: Text(t.name, style: AppTheme.bodyMedium),
+                    subtitle: Text('${t.initial} • ${t.designation}', style: AppTheme.caption),
+                    trailing: PopupMenuButton<String>(
+                      onSelected: (v) {
+                        if (v == 'edit') _editTeacher(t);
+                        if (v == 'credentials') _setTeacherCredentials(t);
+                        if (v == 'delete') _confirmDeleteTeacher(t);
+                      },
+                      itemBuilder: (_) => [
+                        const PopupMenuItem(value: 'edit', child: Text('Edit')),
+                        const PopupMenuItem(value: 'credentials', child: Text('Set Credentials')),
+                        PopupMenuItem(value: 'delete', child: Text('Delete', style: TextStyle(color: AppTheme.errorRed))),
+                      ],
                     ),
                   ),
-                  ...batches.map((batch) => DropdownMenuItem<String>(
-                        value: batch.id,
-                        child: Text(
-                          batch.name,
-                          style: GoogleFonts.poppins(color: Colors.white),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                    child: Row(
+                      children: [
+                        _permissionChip(
+                          icon: Icons.notifications_outlined,
+                          label: 'Notifications',
+                          enabled: t.notificationsEnabled,
+                          onToggle: () {
+                            final newVal = !t.notificationsEnabled;
+                            debugPrint('[UI] Teacher ${t.initial} notif toggle: ${t.notificationsEnabled} -> $newVal');
+                            final idx = widget.repo.data!.teachers.indexWhere((x) => x.id == t.id);
+                            if (idx != -1) {
+                              widget.repo.data!.teachers[idx] = t.copyWith(notificationsEnabled: newVal);
+                              setState(() {});
+                            }
+                            widget.svc.setTeacherNotificationsEnabled(t.id, newVal);
+                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                              content: Text('Teacher ${t.initial} notifications: $newVal'),
+                              duration: const Duration(seconds: 2),
+                            ));
+                          },
                         ),
-                      )),
+                        const SizedBox(width: 8),
+                        _permissionChip(
+                          icon: Icons.email_outlined,
+                          label: 'Email',
+                          enabled: t.emailEnabled,
+                          onToggle: () {
+                            final newVal = !t.emailEnabled;
+                            debugPrint('[UI] Teacher ${t.initial} email toggle: ${t.emailEnabled} -> $newVal');
+                            final idx = widget.repo.data!.teachers.indexWhere((x) => x.id == t.id);
+                            if (idx != -1) {
+                              widget.repo.data!.teachers[idx] = t.copyWith(emailEnabled: newVal);
+                              setState(() {});
+                            }
+                            widget.svc.setTeacherEmailEnabled(t.id, newVal);
+                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                              content: Text('Teacher ${t.initial} email: $newVal'),
+                              duration: const Duration(seconds: 2),
+                            ));
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
                 ],
-                onChanged: (value) {
-                  setState(() => _selectedBatchId = value);
-                },
               ),
             );
           },
         ),
-
-        const SizedBox(height: 16),
-
-        // Students List
-        Expanded(
-          child: FutureBuilder<List<Student>>(
-            future: _selectedBatchId == null
-                ? service.getStudents(forceRefresh: true)
-                : service.getStudentsByBatchId(_selectedBatchId!),
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Center(child: CircularProgressIndicator());
-              }
-
-              if (snapshot.hasError) {
-                return Center(
-                  child: Text(
-                    'Error: ${snapshot.error}',
-                    style: GoogleFonts.poppins(color: Colors.red),
-                  ),
-                );
-              }
-
-              final students = snapshot.data ?? [];
-
-              if (students.isEmpty) {
-                return Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(Icons.school, size: 64, color: Colors.grey),
-                      const SizedBox(height: 16),
-                      Text(
-                        'No students found',
-                        style: GoogleFonts.poppins(
-                          fontSize: 18,
-                          color: Colors.grey,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      TextButton(
-                        onPressed: () => _showAddStudentDialog(context),
-                        child: const Text('Add Your First Student'),
-                      ),
-                    ],
-                  ),
-                );
-              }
-
-              return ListView.builder(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                itemCount: students.length,
-                itemBuilder: (context, index) {
-                  final student = students[index];
-                  return _StudentCard(
-                    student: student,
-                    onEdit: () => _showEditStudentDialog(context, student),
-                    onDelete: () => _deleteStudent(context, student),
-                    onManageCredentials: _showManageStudentCredentialsDialog,
-                  );
-                },
-              );
-            },
+        Positioned(
+          right: 16, bottom: 16,
+          child: FloatingActionButton(
+            heroTag: 'addTeacher',
+            backgroundColor: AppTheme.primaryBlue,
+            foregroundColor: Colors.white,
+            onPressed: _addTeacher,
+            child: const Icon(Icons.add),
           ),
         ),
       ],
     );
   }
 
-  void _showAddStudentDialog(BuildContext context) {
-    final studentIdController = TextEditingController();
-    final nameController = TextEditingController();
-    String? selectedBatchId;
+  Widget _buildStudentList() {
+    final data = widget.repo.data!;
+    final filtered = data.students.where((s) =>
+      s.name.toLowerCase().contains(_search) ||
+      s.studentId.toLowerCase().contains(_search)).toList();
 
-    showDialog(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setState) => AlertDialog(
-          backgroundColor: const Color(0xFF1E1E1E),
-          title: Text(
-            'Add New Student',
-            style: GoogleFonts.poppins(color: Colors.white),
-          ),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: studentIdController,
-                  style: GoogleFonts.poppins(color: Colors.white),
-                  decoration: const InputDecoration(
-                    labelText: 'Student ID',
-                    hintText: 'e.g., 2023-CSE-001',
-                  ),
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: nameController,
-                  style: GoogleFonts.poppins(color: Colors.white),
-                  decoration: const InputDecoration(
-                    labelText: 'Student Name',
-                    hintText: 'e.g., John Doe',
-                  ),
-                ),
-                const SizedBox(height: 16),
-                FutureBuilder<List<Batch>>(
-                  future: context.read<SupabaseService>().getBatches(),
-                  builder: (context, snapshot) {
-                    if (!snapshot.hasData) {
-                      return const CircularProgressIndicator();
-                    }
-
-                    final batches = snapshot.data!;
-                    return DropdownButtonFormField<String>(
-                      value: selectedBatchId,
-                      decoration: const InputDecoration(labelText: 'Batch'),
-                      dropdownColor: const Color(0xFF2A2A2A),
-                      items: batches.map((batch) => DropdownMenuItem<String>(
-                            value: batch.id,
-                            child: Text(
-                              batch.name,
-                              style: GoogleFonts.poppins(color: Colors.white),
-                            ),
-                          )).toList(),
-                      onChanged: (value) {
-                        setState(() => selectedBatchId = value);
-                      },
-                    );
-                  },
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                final studentId = studentIdController.text.trim();
-                final name = nameController.text.trim();
-
-                if (studentId.isEmpty || name.isEmpty || selectedBatchId == null) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Please fill all fields')),
-                  );
-                  return;
-                }
-
-                final service = context.read<SupabaseService>();
-                final student = Student(
-                  studentId: studentId,
-                  name: name,
-                  batchId: selectedBatchId!,
-                );
-                final success = await service.addStudent(student);
-
-                if (context.mounted) {
-                  Navigator.pop(context);
-                  if (success) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Student added successfully')),
-                    );
-                    this.setState(() {});
-                  } else {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Failed to add student')),
-                    );
-                  }
-                }
-              },
-              child: const Text('Add'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _showEditStudentDialog(BuildContext context, Student student) {
-    final nameController = TextEditingController(text: student.name);
-    String? selectedBatchId = student.batchId;
-
-    showDialog(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setState) => AlertDialog(
-          backgroundColor: const Color(0xFF1E1E1E),
-          title: Text(
-            'Edit Student',
-            style: GoogleFonts.poppins(color: Colors.white),
-          ),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  'Student ID: ${student.studentId}',
-                  style: GoogleFonts.poppins(color: Colors.grey[400]),
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: nameController,
-                  style: GoogleFonts.poppins(color: Colors.white),
-                  decoration: const InputDecoration(labelText: 'Student Name'),
-                ),
-                const SizedBox(height: 16),
-                FutureBuilder<List<Batch>>(
-                  future: context.read<SupabaseService>().getBatches(),
-                  builder: (context, snapshot) {
-                    if (!snapshot.hasData) {
-                      return const CircularProgressIndicator();
-                    }
-
-                    final batches = snapshot.data!;
-                    return DropdownButtonFormField<String>(
-                      value: selectedBatchId,
-                      decoration: const InputDecoration(labelText: 'Batch'),
-                      dropdownColor: const Color(0xFF2A2A2A),
-                      items: batches.map((batch) => DropdownMenuItem<String>(
-                            value: batch.id,
-                            child: Text(
-                              batch.name,
-                              style: GoogleFonts.poppins(color: Colors.white),
-                            ),
-                          )).toList(),
-                      onChanged: (value) {
-                        setState(() => selectedBatchId = value);
-                      },
-                    );
-                  },
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                final updatedStudent = Student(
-                  studentId: student.studentId,
-                  name: nameController.text.trim(),
-                  batchId: selectedBatchId!,
-                );
-
-                final service = context.read<SupabaseService>();
-                final success = await service.updateStudent(
-                  student.studentId,
-                  updatedStudent,
-                );
-
-                if (context.mounted) {
-                  Navigator.pop(context);
-                  if (success) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Student updated successfully')),
-                    );
-                    this.setState(() {});
-                  } else {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Failed to update student')),
-                    );
-                  }
-                }
-              },
-              child: const Text('Update'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _deleteStudent(BuildContext context, Student student) async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1E1E1E),
-        title: Text('Delete Student?', style: GoogleFonts.poppins(color: Colors.white)),
-        content: Text(
-          'Are you sure you want to delete ${student.name}?',
-          style: GoogleFonts.poppins(color: Colors.white70),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirm == true && context.mounted) {
-      final service = context.read<SupabaseService>();
-      final success = await service.deleteStudent(student.studentId);
-
-      if (context.mounted) {
-        if (success) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Student deleted successfully')),
-          );
-          setState(() {});
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Failed to delete student')),
-          );
-        }
-      }
-    }
-  }
-  void _showManageStudentCredentialsDialog(BuildContext context, Student student) async {
-    final passwordController = TextEditingController();
-    bool _showPassword = false;
-
-    // Fetch latest student data from database to get updated has_changed_password flag
-    final service = context.read<SupabaseService>();
-    final updatedStudent = await service.getStudentById(student.studentId);
-    final studentToShow = updatedStudent ?? student;
-    
-    final emailController = TextEditingController(text: studentToShow.email ?? '');
-
-    showDialog(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setState) => AlertDialog(
-          backgroundColor: const Color(0xFF1E1E1E),
-          title: Text(
-            'Set Login Credentials: ${studentToShow.name}',
-            style: GoogleFonts.poppins(
-              fontSize: 18,
-              fontWeight: FontWeight.w600,
-              color: Colors.white,
-            ),
-          ),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (studentToShow.hasChangedPassword)
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.red.withOpacity(0.2),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.lock, color: Colors.red, size: 20),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'This student has changed their password. Credentials are locked and cannot be modified.',
-                            style: GoogleFonts.poppins(
-                              fontSize: 12,
-                              color: Colors.red[200],
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  )
-                else ...[
-                  TextField(
-                    controller: emailController,
-                    style: GoogleFonts.poppins(color: Colors.white),
-                    decoration: InputDecoration(
-                      labelText: 'Email',
-                      labelStyle: GoogleFonts.poppins(color: Colors.grey[600]),
-                      prefixIcon: Icon(Icons.email, color: Colors.grey[600]),
-                      filled: true,
-                      fillColor: const Color(0xFF2A2A2A),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide.none,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: passwordController,
-                    style: GoogleFonts.poppins(color: Colors.white),
-                    obscureText: !_showPassword,
-                    decoration: InputDecoration(
-                      labelText: 'Initial Password',
-                      labelStyle: GoogleFonts.poppins(color: Colors.grey[600]),
-                      prefixIcon: Icon(Icons.lock, color: Colors.grey[600]),
-                      suffixIcon: IconButton(
-                        icon: Icon(
-                          _showPassword ? Icons.visibility : Icons.visibility_off,
-                          color: Colors.grey[600],
-                        ),
-                        onPressed: () => setState(() => _showPassword = !_showPassword),
-                      ),
-                      filled: true,
-                      fillColor: const Color(0xFF2A2A2A),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide.none,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.amber.withOpacity(0.2),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.warning_amber, color: Colors.amber, size: 20),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'Once the student changes their password, you won\'t be able to see it anymore.',
-                            style: GoogleFonts.poppins(
-                              fontSize: 12,
-                              color: Colors.amber[200],
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-            if (!studentToShow.hasChangedPassword)
-              ElevatedButton(
-                onPressed: () async {
-                  if (passwordController.text.isEmpty || emailController.text.isEmpty) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Please fill in all fields')),
-                    );
-                    return;
-                  }
-
-                  final service = context.read<SupabaseService>();
-                  try {
-                    await service.setStudentCredentials(
-                      studentToShow.studentId,
-                      emailController.text.trim(),
-                      passwordController.text,
-                    );
-
-                    if (context.mounted) {
-                      Navigator.pop(context);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Credentials set successfully')),
-                      );
-                    }
-                  } catch (e) {
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('Error: $e')),
-                      );
-                    }
-                  }
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF5B7CFF),
-                ),
-                child: const Text('Set Credentials'),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _StudentCard extends StatelessWidget {
-  final Student student;
-  final VoidCallback onEdit;
-  final VoidCallback onDelete;
-  final Function(BuildContext, Student)? onManageCredentials;
-
-  const _StudentCard({
-    required this.student,
-    required this.onEdit,
-    required this.onDelete,
-    this.onManageCredentials,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      child: ListTile(
-        leading: Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: const Color(0xFF8A5BFF).withOpacity(0.2),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: const Icon(Icons.school, color: Color(0xFF8A5BFF)),
-        ),
-        title: Text(
-          student.name,
-          style: GoogleFonts.poppins(
-            fontWeight: FontWeight.w600,
-            color: Colors.white,
-          ),
-        ),
-        subtitle: Text(
-          student.studentId,
-          style: GoogleFonts.poppins(color: Colors.grey[400]),
-        ),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (onManageCredentials != null)
-              IconButton(
-                icon: const Icon(Icons.vpn_key, color: Color(0xFF8A5BFF)),
-                onPressed: () => onManageCredentials!(context, student),
-                tooltip: 'Manage Login Credentials',
-              ),
-            IconButton(
-              icon: const Icon(Icons.edit, color: Color(0xFF5B7CFF)),
-              onPressed: onEdit,
-            ),
-            IconButton(
-              icon: const Icon(Icons.delete, color: Colors.red),
-              onPressed: onDelete,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// =====================================================
-// TEACHERS TAB
-// =====================================================
-class _TeachersTab extends StatefulWidget {
-  @override
-  State<_TeachersTab> createState() => _TeachersTabState();
-}
-
-class _TeachersTabState extends State<_TeachersTab> {
-  String _searchQuery = '';
-
-  @override
-  Widget build(BuildContext context) {
-    final service = context.watch<SupabaseService>();
-
-    return Column(
+    return Stack(
       children: [
-        // Header with Add Button
-        Container(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              Text(
-                'Manage Teachers',
-                style: GoogleFonts.poppins(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.white,
-                ),
-              ),
-              const Spacer(),
-              ElevatedButton.icon(
-                onPressed: () => _showAddTeacherDialog(context),
-                icon: const Icon(Icons.add),
-                label: const Text('Add Teacher'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF5B7CFF),
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                ),
-              ),
-            ],
-          ),
-        ),
-
-        // Search Bar
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: TextField(
-            onChanged: (value) => setState(() => _searchQuery = value),
-            style: GoogleFonts.poppins(color: Colors.white),
-            decoration: InputDecoration(
-              labelText: 'Search teachers...',
-              labelStyle: GoogleFonts.poppins(color: Colors.grey[400]),
-              prefixIcon: const Icon(Icons.search, color: Color(0xFF5B7CFF)),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-          ),
-        ),
-
-        const SizedBox(height: 16),
-
-        // Teachers List
-        Expanded(
-          child: FutureBuilder<List<Teacher>>(
-            future: service.getTeachers(forceRefresh: true),
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Center(child: CircularProgressIndicator());
-              }
-
-              if (snapshot.hasError) {
-                return Center(
-                  child: Text(
-                    'Error: ${snapshot.error}',
-                    style: GoogleFonts.poppins(color: Colors.red),
+        ListView.builder(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 80),
+          itemCount: filtered.length,
+          itemBuilder: (ctx, i) {
+            final s = filtered[i];
+            final batch = widget.repo.batchById(s.batchId);
+            return Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              decoration: AppTheme.cleanCardDecoration,
+              child: Column(
+                children: [
+                  ListTile(
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                    leading: CircleAvatar(
+                      backgroundColor: AppTheme.successGreen.withValues(alpha: 0.1),
+                      child: Text(s.name.isNotEmpty ? s.name[0] : '?',
+                        style: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: AppTheme.successGreen)),
+                    ),
+                    title: Text(s.name, style: AppTheme.bodyMedium),
+                    subtitle: Text('${s.studentId} • ${batch?.name ?? s.batchId}', style: AppTheme.caption),
+                    trailing: PopupMenuButton<String>(
+                      onSelected: (v) {
+                        if (v == 'edit') _editStudent(s);
+                        if (v == 'credentials') _setStudentCredentials(s);
+                        if (v == 'delete') _confirmDeleteStudent(s);
+                      },
+                      itemBuilder: (_) => [
+                        const PopupMenuItem(value: 'edit', child: Text('Edit')),
+                        const PopupMenuItem(value: 'credentials', child: Text('Set Credentials')),
+                        PopupMenuItem(value: 'delete', child: Text('Delete', style: TextStyle(color: AppTheme.errorRed))),
+                      ],
+                    ),
                   ),
-                );
-              }
-
-              var teachers = snapshot.data ?? [];
-
-              // Apply search filter
-              if (_searchQuery.isNotEmpty) {
-                teachers = teachers.where((teacher) {
-                  final query = _searchQuery.toLowerCase();
-                  return teacher.name.toLowerCase().contains(query) ||
-                      teacher.initial.toLowerCase().contains(query) ||
-                      teacher.email.toLowerCase().contains(query) ||
-                      teacher.designation.toLowerCase().contains(query);
-                }).toList();
-              }
-
-              if (teachers.isEmpty) {
-                return Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(Icons.person, size: 64, color: Colors.grey),
-                      const SizedBox(height: 16),
-                      Text(
-                        _searchQuery.isEmpty ? 'No teachers found' : 'No matching teachers',
-                        style: GoogleFonts.poppins(
-                          fontSize: 18,
-                          color: Colors.grey,
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                    child: Row(
+                      children: [
+                        _permissionChip(
+                          icon: Icons.notifications_outlined,
+                          label: 'Notifications',
+                          enabled: s.notificationsEnabled,
+                          onToggle: () {
+                            final newVal = !s.notificationsEnabled;
+                            debugPrint('[UI] Student ${s.studentId} notif toggle: ${s.notificationsEnabled} -> $newVal');
+                            final idx = widget.repo.data!.students.indexWhere((x) => x.studentId == s.studentId);
+                            if (idx != -1) {
+                              widget.repo.data!.students[idx] = s.copyWith(notificationsEnabled: newVal);
+                              setState(() {});
+                            }
+                            widget.svc.setStudentNotificationsEnabled(s.studentId, newVal);
+                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                              content: Text('Student ${s.studentId} notifications: $newVal'),
+                              duration: const Duration(seconds: 2),
+                            ));
+                          },
                         ),
-                      ),
-                      if (_searchQuery.isEmpty) ...[
-                        const SizedBox(height: 8),
-                        TextButton(
-                          onPressed: () => _showAddTeacherDialog(context),
-                          child: const Text('Add Your First Teacher'),
+                        const SizedBox(width: 8),
+                        _permissionChip(
+                          icon: Icons.email_outlined,
+                          label: 'Email',
+                          enabled: s.emailEnabled,
+                          onToggle: () {
+                            final newVal = !s.emailEnabled;
+                            debugPrint('[UI] Student ${s.studentId} email toggle: ${s.emailEnabled} -> $newVal');
+                            final idx = widget.repo.data!.students.indexWhere((x) => x.studentId == s.studentId);
+                            if (idx != -1) {
+                              widget.repo.data!.students[idx] = s.copyWith(emailEnabled: newVal);
+                              setState(() {});
+                            }
+                            widget.svc.setStudentEmailEnabled(s.studentId, newVal);
+                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                              content: Text('Student ${s.studentId} email: $newVal'),
+                              duration: const Duration(seconds: 2),
+                            ));
+                          },
                         ),
                       ],
-                    ],
+                    ),
                   ),
-                );
-              }
-
-              return ListView.builder(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                itemCount: teachers.length,
-                itemBuilder: (context, index) {
-                  final teacher = teachers[index];
-                  return _TeacherCard(
-                    teacher: teacher,
-                    onEdit: () => _showEditTeacherDialog(context, teacher),
-                    onDelete: () => _deleteTeacher(context, teacher),
-                    onManageCredentials: _showManageTeacherCredentialsDialog,
-                  );
-                },
-              );
-            },
+                ],
+              ),
+            );
+          },
+        ),
+        Positioned(
+          right: 16, bottom: 16,
+          child: FloatingActionButton(
+            heroTag: 'addStudent',
+            backgroundColor: AppTheme.primaryBlue,
+            foregroundColor: Colors.white,
+            onPressed: _addStudent,
+            child: const Icon(Icons.add),
           ),
         ),
       ],
     );
   }
 
-  void _showAddTeacherDialog(BuildContext context) {
-    final nameController = TextEditingController();
-    final initialController = TextEditingController();
-    final emailController = TextEditingController();
-    final phoneController = TextEditingController();
-    final designationController = TextEditingController();
-    final homeDepartmentController = TextEditingController();
+  Widget _buildBatchList() {
+    final data = widget.repo.data!;
+    final filtered = data.batches.where((b) =>
+      b.name.toLowerCase().contains(_search) ||
+      b.id.toLowerCase().contains(_search)).toList();
 
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1E1E1E),
-        title: Text(
-          'Add New Teacher',
-          style: GoogleFonts.poppins(color: Colors.white),
+    return Stack(
+      children: [
+        ListView.builder(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 80),
+          itemCount: filtered.length,
+          itemBuilder: (ctx, i) {
+            final b = filtered[i];
+            final studentCount = data.students.where((s) => s.batchId == b.id).length;
+            return Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              decoration: AppTheme.cleanCardDecoration,
+              child: ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                leading: CircleAvatar(
+                  backgroundColor: const Color(0xFF8B5CF6).withValues(alpha: 0.1),
+                  child: const Icon(Icons.group_work_outlined, color: Color(0xFF8B5CF6), size: 20),
+                ),
+                title: Text(b.name, style: AppTheme.bodyMedium),
+                subtitle: Text('ID: ${b.id} • Session: ${b.session} • $studentCount students', style: AppTheme.caption),
+                trailing: PopupMenuButton<String>(
+                  onSelected: (v) {
+                    if (v == 'edit') _editBatch(b);
+                    if (v == 'delete') _confirmDeleteBatch(b);
+                  },
+                  itemBuilder: (_) => [
+                    const PopupMenuItem(value: 'edit', child: Text('Edit')),
+                    PopupMenuItem(value: 'delete', child: Text('Delete', style: TextStyle(color: AppTheme.errorRed))),
+                  ],
+                ),
+              ),
+            );
+          },
         ),
-        content: SingleChildScrollView(
-          child: Column(
+        Positioned(
+          right: 16, bottom: 16,
+          child: FloatingActionButton(
+            heroTag: 'addBatch',
+            backgroundColor: AppTheme.primaryBlue,
+            foregroundColor: Colors.white,
+            onPressed: _addBatch,
+            child: const Icon(Icons.add),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ── PERMISSION CHIP WIDGET ──
+
+  Widget _permissionChip({
+    required IconData icon,
+    required String label,
+    required bool enabled,
+    required VoidCallback onToggle,
+  }) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: onToggle,
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+          decoration: BoxDecoration(
+            color: enabled
+                ? AppTheme.successGreen.withValues(alpha: 0.08)
+                : AppTheme.surfaceLight,
+            borderRadius: BorderRadius.circular(AppTheme.radiusS),
+            border: Border.all(
+              color: enabled
+                  ? AppTheme.successGreen.withValues(alpha: 0.3)
+                  : AppTheme.borderLight,
+            ),
+          ),
+          child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              TextField(
-                controller: nameController,
-                style: GoogleFonts.poppins(color: Colors.white),
-                decoration: const InputDecoration(
-                  labelText: 'Full Name *',
-                  hintText: 'e.g., Dr. John Doe',
-                ),
+              Icon(
+                enabled ? Icons.check_circle : Icons.circle_outlined,
+                size: 16,
+                color: enabled ? AppTheme.successGreen : AppTheme.textHint,
               ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: initialController,
-                style: GoogleFonts.poppins(color: Colors.white),
-                decoration: const InputDecoration(
-                  labelText: 'Initial *',
-                  hintText: 'e.g., JD',
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: emailController,
-                style: GoogleFonts.poppins(color: Colors.white),
-                keyboardType: TextInputType.emailAddress,
-                decoration: const InputDecoration(
-                  labelText: 'Email *',
-                  hintText: 'e.g., john.doe@university.edu',
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: phoneController,
-                style: GoogleFonts.poppins(color: Colors.white),
-                keyboardType: TextInputType.phone,
-                decoration: const InputDecoration(
-                  labelText: 'Phone *',
-                  hintText: 'e.g., +1234567890',
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: designationController,
-                style: GoogleFonts.poppins(color: Colors.white),
-                decoration: const InputDecoration(
-                  labelText: 'Designation *',
-                  hintText: 'e.g., Professor',
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: homeDepartmentController,
-                style: GoogleFonts.poppins(color: Colors.white),
-                decoration: const InputDecoration(
-                  labelText: 'Home Department *',
-                  hintText: 'e.g., Computer Science',
-                ),
+              const SizedBox(width: 4),
+              Icon(icon, size: 14, color: enabled ? AppTheme.successGreen : AppTheme.textHint),
+              const SizedBox(width: 4),
+              Flexible(
+                child: Text(label, style: GoogleFonts.poppins(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w500,
+                  color: enabled ? AppTheme.successGreen : AppTheme.textHint,
+                ), overflow: TextOverflow.ellipsis),
               ),
             ],
           ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
+      ),
+    );
+  }
+
+  // ── TEACHER CRUD DIALOGS ──
+
+  void _addTeacher() {
+    final nameC = TextEditingController();
+    final initialC = TextEditingController();
+    final desigC = TextEditingController();
+    final phoneC = TextEditingController();
+    final emailC = TextEditingController();
+    final deptC = TextEditingController();
+    _showFormDialog(
+      title: 'Add Teacher',
+      fields: [
+        _FormField('Name', nameC, Icons.person_outline),
+        _FormField('Initial', initialC, Icons.badge_outlined),
+        _FormField('Designation', desigC, Icons.school_outlined),
+        _FormField('Department', deptC, Icons.business_outlined),
+        _FormField('Email', emailC, Icons.email_outlined),
+        _FormField('Phone', phoneC, Icons.phone_outlined),
+      ],
+      onConfirm: () async {
+        final t = Teacher(
+          id: initialC.text.trim(),
+          name: nameC.text.trim(),
+          initial: initialC.text.trim(),
+          designation: desigC.text.trim(),
+          phone: phoneC.text.trim(),
+          email: emailC.text.trim(),
+          homeDepartment: deptC.text.trim(),
+        );
+        await widget.svc.addTeacher(t);
+        // Send welcome notification to the new teacher
+        await widget.svc.createNotification(AppNotification(
+          id: '',
+          type: 'general',
+          title: 'Welcome to EDTE!',
+          body: 'You have been added as a teacher by Super Admin. Initial: ${t.initial}',
+          recipientType: 'teacher',
+          recipientId: t.initial,
+          createdAt: '',
+        ));
+        widget.onRefresh();
+      },
+    );
+  }
+
+  void _editTeacher(Teacher t) {
+    final nameC = TextEditingController(text: t.name);
+    final desigC = TextEditingController(text: t.designation);
+    final phoneC = TextEditingController(text: t.phone);
+    final emailC = TextEditingController(text: t.email);
+    final deptC = TextEditingController(text: t.homeDepartment);
+    _showFormDialog(
+      title: 'Edit Teacher',
+      fields: [
+        _FormField('Name', nameC, Icons.person_outline),
+        _FormField('Designation', desigC, Icons.school_outlined),
+        _FormField('Department', deptC, Icons.business_outlined),
+        _FormField('Email', emailC, Icons.email_outlined),
+        _FormField('Phone', phoneC, Icons.phone_outlined),
+      ],
+      onConfirm: () async {
+        final updated = t.copyWith(
+          name: nameC.text.trim(),
+          designation: desigC.text.trim(),
+          phone: phoneC.text.trim(),
+          email: emailC.text.trim(),
+          homeDepartment: deptC.text.trim(),
+        );
+        debugPrint('[UI] editTeacher: before -> notif=${t.notificationsEnabled}, email=${t.emailEnabled}');
+        debugPrint('[UI] editTeacher: updated -> notif=${updated.notificationsEnabled}, email=${updated.emailEnabled}');
+        // Optimistic local update — preserves permission fields via copyWith
+        final idx = widget.repo.data!.teachers.indexWhere((x) => x.id == t.id);
+        if (idx != -1) {
+          widget.repo.data!.teachers[idx] = updated;
+          setState(() {});
+        }
+        await widget.svc.updateTeacher(t.id, updated);
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Teacher ${t.initial} updated (notif=${updated.notificationsEnabled}, email=${updated.emailEnabled})'),
+            duration: const Duration(seconds: 3),
+          ));
+        }
+      },
+    );
+  }
+
+  void _setTeacherCredentials(Teacher t) {
+    final emailC = TextEditingController(text: t.email);
+    final passC = TextEditingController();
+    _showFormDialog(
+      title: 'Set Teacher Credentials',
+      fields: [
+        _FormField('Email', emailC, Icons.email_outlined),
+        _FormField('Password', passC, Icons.lock_outline),
+      ],
+      onConfirm: () async {
+        await widget.svc.setTeacherCredentials(
+          t.id,
+          emailC.text.trim(),
+          passC.text,
+        );
+        widget.onRefresh();
+      },
+    );
+  }
+
+  void _confirmDeleteTeacher(Teacher t) {
+    _showDeleteDialog('Delete Teacher', 'Remove "${t.name}" (${t.initial})?', () async {
+      await widget.svc.deleteTeacher(t.id);
+      widget.onRefresh();
+    });
+  }
+
+  // ── STUDENT CRUD DIALOGS ──
+
+  void _addStudent() {
+    final idC = TextEditingController();
+    final nameC = TextEditingController();
+    final batchC = TextEditingController();
+    final emailC = TextEditingController();
+    _showFormDialog(
+      title: 'Add Student',
+      fields: [
+        _FormField('Student ID', idC, Icons.badge_outlined),
+        _FormField('Name', nameC, Icons.person_outline),
+        _FormField('Batch ID', batchC, Icons.group_work_outlined),
+        _FormField('Email', emailC, Icons.email_outlined),
+      ],
+      onConfirm: () async {
+        final s = Student(
+          studentId: idC.text.trim(),
+          name: nameC.text.trim(),
+          batchId: batchC.text.trim(),
+          email: emailC.text.trim(),
+        );
+        await widget.svc.addStudent(s);
+        widget.onRefresh();
+      },
+    );
+  }
+
+  void _editStudent(Student s) {
+    final nameC = TextEditingController(text: s.name);
+    final batchC = TextEditingController(text: s.batchId);
+    final emailC = TextEditingController(text: s.email ?? '');
+    _showFormDialog(
+      title: 'Edit Student',
+      fields: [
+        _FormField('Name', nameC, Icons.person_outline),
+        _FormField('Batch ID', batchC, Icons.group_work_outlined),
+        _FormField('Email', emailC, Icons.email_outlined),
+      ],
+      onConfirm: () async {
+        final updated = s.copyWith(
+          name: nameC.text.trim(),
+          batchId: batchC.text.trim(),
+          email: emailC.text.trim(),
+        );
+        debugPrint('[UI] editStudent: before -> notif=${s.notificationsEnabled}, email=${s.emailEnabled}');
+        debugPrint('[UI] editStudent: updated -> notif=${updated.notificationsEnabled}, email=${updated.emailEnabled}');
+        // Optimistic local update — preserves permission fields via copyWith
+        final idx = widget.repo.data!.students.indexWhere((x) => x.studentId == s.studentId);
+        if (idx != -1) {
+          widget.repo.data!.students[idx] = updated;
+          setState(() {});
+        }
+        await widget.svc.updateStudent(s.studentId, updated);
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Student ${s.studentId} updated (notif=${updated.notificationsEnabled}, email=${updated.emailEnabled})'),
+            duration: const Duration(seconds: 3),
+          ));
+        }
+      },
+    );
+  }
+
+  void _setStudentCredentials(Student s) {
+    final emailC = TextEditingController(text: s.email ?? '');
+    final passC = TextEditingController();
+    _showFormDialog(
+      title: 'Set Student Credentials',
+      fields: [
+        _FormField('Email', emailC, Icons.email_outlined),
+        _FormField('Password', passC, Icons.lock_outline),
+      ],
+      onConfirm: () async {
+        await widget.svc.setStudentCredentials(
+          s.studentId,
+          emailC.text.trim(),
+          passC.text,
+        );
+        widget.onRefresh();
+      },
+    );
+  }
+
+  void _confirmDeleteStudent(Student s) {
+    _showDeleteDialog('Delete Student', 'Remove "${s.name}" (${s.studentId})?', () async {
+      await widget.svc.deleteStudent(s.studentId);
+      widget.onRefresh();
+    });
+  }
+
+  // ── BATCH CRUD DIALOGS ──
+
+  void _addBatch() {
+    final idC = TextEditingController();
+    final nameC = TextEditingController();
+    final sessionC = TextEditingController();
+    _showFormDialog(
+      title: 'Add Batch',
+      fields: [
+        _FormField('Batch ID', idC, Icons.tag_outlined),
+        _FormField('Batch Name', nameC, Icons.group_work_outlined),
+        _FormField('Session', sessionC, Icons.calendar_today_outlined),
+      ],
+      onConfirm: () async {
+        final b = Batch(id: idC.text.trim(), name: nameC.text.trim(), session: sessionC.text.trim());
+        await widget.svc.addBatch(b);
+        widget.onRefresh();
+      },
+    );
+  }
+
+  void _editBatch(Batch b) {
+    final nameC = TextEditingController(text: b.name);
+    final sessionC = TextEditingController(text: b.session);
+    _showFormDialog(
+      title: 'Edit Batch',
+      fields: [
+        _FormField('Batch Name', nameC, Icons.group_work_outlined),
+        _FormField('Session', sessionC, Icons.calendar_today_outlined),
+      ],
+      onConfirm: () async {
+        final updated = Batch(id: b.id, name: nameC.text.trim(), session: sessionC.text.trim());
+        await widget.svc.updateBatch(b.id, updated);
+        widget.onRefresh();
+      },
+    );
+  }
+
+  void _confirmDeleteBatch(Batch b) {
+    _showDeleteDialog('Delete Batch', 'Remove "${b.name}" (${b.id})?', () async {
+      await widget.svc.deleteBatch(b.id);
+      widget.onRefresh();
+    });
+  }
+
+  // ── GENERIC DIALOGS ──
+
+  void _showFormDialog({
+    required String title,
+    required List<_FormField> fields,
+    required Future<void> Function() onConfirm,
+  }) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppTheme.radiusL)),
+        title: Text(title, style: AppTheme.heading3),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: fields.map((f) => Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: TextField(
+                  controller: f.ctrl,
+                  decoration: AppTheme.inputDecoration(label: f.label, prefixIcon: f.icon),
+                  style: GoogleFonts.poppins(fontSize: 14),
+                ),
+              )).toList(),
+            ),
           ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           ElevatedButton(
             onPressed: () async {
-              final name = nameController.text.trim();
-              final initial = initialController.text.trim();
-              final email = emailController.text.trim();
-              final phone = phoneController.text.trim();
-              final designation = designationController.text.trim();
-              final homeDepartment = homeDepartmentController.text.trim();
-
-              if (name.isEmpty || initial.isEmpty || email.isEmpty || 
-                  phone.isEmpty || designation.isEmpty || homeDepartment.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Please fill all fields')),
-                );
-                return;
-              }
-
-              final service = context.read<SupabaseService>();
-              final teacher = Teacher(
-                id: '',
-                initial: initial,
-                name: name,
-                email: email,
-                phone: phone,
-                designation: designation,
-                homeDepartment: homeDepartment,
-              );
-              final success = await service.addTeacher(teacher);
-
-              if (context.mounted) {
-                Navigator.pop(context);
-                if (success) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Teacher added successfully')),
-                  );
-                  setState(() {});
-                } else {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Failed to add teacher')),
-                  );
-                }
-              }
+              Navigator.pop(ctx);
+              await onConfirm();
             },
-            child: const Text('Add'),
+            child: const Text('Save'),
           ),
         ],
       ),
     );
   }
 
-  void _showEditTeacherDialog(BuildContext context, Teacher teacher) {
-    final nameController = TextEditingController(text: teacher.name);
-    final emailController = TextEditingController(text: teacher.email);
-    final phoneController = TextEditingController(text: teacher.phone);
-    final designationController = TextEditingController(text: teacher.designation);
-    final homeDepartmentController = TextEditingController(text: teacher.homeDepartment);
-
+  void _showDeleteDialog(String title, String msg, Future<void> Function() onDelete) {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1E1E1E),
-        title: Text(
-          'Edit Teacher',
-          style: GoogleFonts.poppins(color: Colors.white),
-        ),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                'Initial: ${teacher.initial}',
-                style: GoogleFonts.poppins(color: Colors.grey[400]),
-              ),
-              const SizedBox(height: 16),
-              // Profile Picture Display (Read-only)
-              if (teacher.profilePic != null && teacher.profilePic!.isNotEmpty) ...[
-                Container(
-                  decoration: BoxDecoration(
-                    border: Border.all(color: Colors.grey[600]!),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  padding: const EdgeInsets.all(8),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Profile Picture (managed by teacher)',
-                        style: GoogleFonts.poppins(
-                          fontSize: 12,
-                          color: Colors.grey[400],
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
-                        child: Image.network(
-                          teacher.profilePic!,
-                          height: 100,
-                          width: double.infinity,
-                          fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) {
-                            return Container(
-                              height: 100,
-                              color: Colors.grey[800],
-                              child: const Icon(Icons.broken_image),
-                            );
-                          },
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 16),
-              ],
-              TextField(
-                controller: nameController,
-                style: GoogleFonts.poppins(color: Colors.white),
-                decoration: const InputDecoration(labelText: 'Full Name'),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: emailController,
-                style: GoogleFonts.poppins(color: Colors.white),
-                keyboardType: TextInputType.emailAddress,
-                decoration: const InputDecoration(labelText: 'Email'),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: phoneController,
-                style: GoogleFonts.poppins(color: Colors.white),
-                keyboardType: TextInputType.phone,
-                decoration: const InputDecoration(labelText: 'Phone'),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: designationController,
-                style: GoogleFonts.poppins(color: Colors.white),
-                decoration: const InputDecoration(labelText: 'Designation'),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: homeDepartmentController,
-                style: GoogleFonts.poppins(color: Colors.white),
-                decoration: const InputDecoration(labelText: 'Home Department'),
-              ),
-            ],
-          ),
-        ),
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppTheme.radiusL)),
+        title: Text(title, style: AppTheme.heading3),
+        content: Text(msg, style: AppTheme.body),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.errorRed),
             onPressed: () async {
-              final updatedTeacher = Teacher(
-                id: teacher.id,
-                initial: teacher.initial,
-                name: nameController.text.trim(),
-                email: emailController.text.trim(),
-                phone: phoneController.text.trim(),
-                designation: designationController.text.trim(),
-                homeDepartment: homeDepartmentController.text.trim(),
-              );
-
-              final service = context.read<SupabaseService>();
-              final success = await service.updateTeacher(
-                teacher.initial,
-                updatedTeacher,
-              );
-
-              if (context.mounted) {
-                Navigator.pop(context);
-                if (success) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Teacher updated successfully')),
-                  );
-                  setState(() {});
-                } else {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Failed to update teacher')),
-                  );
-                }
-              }
+              Navigator.pop(ctx);
+              await onDelete();
             },
-            child: const Text('Update'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _deleteTeacher(BuildContext context, Teacher teacher) async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1E1E1E),
-        title: Text('Delete Teacher?', style: GoogleFonts.poppins(color: Colors.white)),
-        content: Text(
-          'Are you sure you want to delete ${teacher.name}?',
-          style: GoogleFonts.poppins(color: Colors.white70),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
             child: const Text('Delete'),
           ),
         ],
       ),
     );
-
-    if (confirm == true && context.mounted) {
-      final service = context.read<SupabaseService>();
-      final success = await service.deleteTeacher(teacher.initial);
-
-      if (context.mounted) {
-        if (success) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Teacher deleted successfully')),
-          );
-          setState(() {});
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Failed to delete teacher')),
-          );
-        }
-      }
-    }
-  }
-
-  void _showManageTeacherCredentialsDialog(BuildContext context, Teacher teacher) async {
-    final passwordController = TextEditingController();
-    bool _showPassword = false;
-
-    // Fetch latest teacher data from database to get updated has_changed_password flag
-    final service = context.read<SupabaseService>();
-    final updatedTeacher = await service.getTeacherById(teacher.id);
-    final teacherToShow = updatedTeacher ?? teacher;
-    
-    final emailController = TextEditingController(text: teacherToShow.email);
-
-    showDialog(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setState) => AlertDialog(
-          backgroundColor: const Color(0xFF1E1E1E),
-          title: Text(
-            'Set Login Credentials: ${teacherToShow.name}',
-            style: GoogleFonts.poppins(
-              fontSize: 18,
-              fontWeight: FontWeight.w600,
-              color: Colors.white,
-            ),
-          ),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (teacherToShow.hasChangedPassword)
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.red.withOpacity(0.2),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.lock, color: Colors.red, size: 20),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'This teacher has changed their password. Credentials are locked and cannot be modified.',
-                            style: GoogleFonts.poppins(
-                              fontSize: 12,
-                              color: Colors.red[200],
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  )
-                else ...[
-                  TextField(
-                    controller: emailController,
-                    style: GoogleFonts.poppins(color: Colors.white),
-                    decoration: InputDecoration(
-                      labelText: 'Email',
-                      labelStyle: GoogleFonts.poppins(color: Colors.grey[600]),
-                      prefixIcon: Icon(Icons.email, color: Colors.grey[600]),
-                      filled: true,
-                      fillColor: const Color(0xFF2A2A2A),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide.none,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: passwordController,
-                    style: GoogleFonts.poppins(color: Colors.white),
-                    obscureText: !_showPassword,
-                    decoration: InputDecoration(
-                      labelText: 'Initial Password',
-                      labelStyle: GoogleFonts.poppins(color: Colors.grey[600]),
-                      prefixIcon: Icon(Icons.lock, color: Colors.grey[600]),
-                      suffixIcon: IconButton(
-                        icon: Icon(
-                          _showPassword ? Icons.visibility : Icons.visibility_off,
-                          color: Colors.grey[600],
-                        ),
-                        onPressed: () => setState(() => _showPassword = !_showPassword),
-                      ),
-                      filled: true,
-                      fillColor: const Color(0xFF2A2A2A),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide.none,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.amber.withOpacity(0.2),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.warning_amber, color: Colors.amber, size: 20),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'Once the teacher changes their password, you won\'t be able to see it anymore.',
-                            style: GoogleFonts.poppins(
-                              fontSize: 12,
-                              color: Colors.amber[200],
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-            if (!teacherToShow.hasChangedPassword)
-              ElevatedButton(
-                onPressed: () async {
-                  if (passwordController.text.isEmpty || emailController.text.isEmpty) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Please fill in all fields')),
-                    );
-                    return;
-                  }
-
-                  final service = context.read<SupabaseService>();
-                  try {
-                    await service.setTeacherCredentials(
-                      teacherToShow.id,
-                      emailController.text.trim(),
-                      passwordController.text,
-                    );
-
-                    if (context.mounted) {
-                      Navigator.pop(context);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Credentials set successfully')),
-                      );
-                    }
-                  } catch (e) {
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('Error: $e')),
-                      );
-                    }
-                  }
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF5B7CFF),
-                ),
-                child: const Text('Set Credentials'),
-              ),
-          ],
-        ),
-      ),
-    );
   }
 }
 
-class _TeacherCard extends StatelessWidget {
-  final Teacher teacher;
-  final VoidCallback onEdit;
-  final VoidCallback onDelete;
-  final Function(BuildContext, Teacher)? onManageCredentials;
+class _FormField {
+  final String label;
+  final TextEditingController ctrl;
+  final IconData icon;
+  const _FormField(this.label, this.ctrl, this.icon);
+}
 
-  const _TeacherCard({
-    required this.teacher,
-    required this.onEdit,
-    required this.onDelete,
-    this.onManageCredentials,
-  });
+class _SectionPill extends StatelessWidget {
+  final String label;
+  final bool isActive;
+  final VoidCallback onTap;
+  const _SectionPill({required this.label, required this.isActive, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                // Profile Picture or Initial Avatar
-                teacher.profilePic != null && teacher.profilePic!.isNotEmpty
-                    ? ClipRRect(
-                        borderRadius: BorderRadius.circular(10),
-                        child: Image.network(
-                          teacher.profilePic!,
-                          width: 50,
-                          height: 50,
-                          fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) {
-                            return _buildInitialAvatar();
-                          },
-                        ),
-                      )
-                    : _buildInitialAvatar(),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        teacher.name,
-                        style: GoogleFonts.poppins(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.white,
-                        ),
-                      ),
-                      Text(
-                        teacher.designation,
-                        style: GoogleFonts.poppins(
-                          fontSize: 12,
-                          color: Colors.grey[400],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.edit, color: Color(0xFF5B7CFF)),
-                  onPressed: onEdit,
-                ),
-                if (onManageCredentials != null)
-                  IconButton(
-                    icon: const Icon(Icons.vpn_key, color: Color(0xFF8A5BFF)),
-                    onPressed: () => onManageCredentials!(context, teacher),
-                    tooltip: 'Manage Login Credentials',
-                  ),
-                IconButton(
-                  icon: const Icon(Icons.delete, color: Colors.red),
-                  onPressed: onDelete,
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Divider(color: Colors.grey[800]),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                const Icon(Icons.email, size: 16, color: Color(0xFF5B7CFF)),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    teacher.email,
-                    style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey[400]),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                const Icon(Icons.phone, size: 16, color: Color(0xFF5B7CFF)),
-                const SizedBox(width: 8),
-                Text(
-                  teacher.phone,
-                  style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey[400]),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                const Icon(Icons.business, size: 16, color: Color(0xFF5B7CFF)),
-                const SizedBox(width: 8),
-                Text(
-                  teacher.homeDepartment,
-                  style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey[400]),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildInitialAvatar() {
-    return Container(
-      width: 50,
-      height: 50,
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0xFFFF6B6B), Color(0xFFFF8E8E)],
-        ),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Center(
-        child: Text(
-          teacher.initial,
-          style: GoogleFonts.poppins(
-            fontSize: 16,
-            fontWeight: FontWeight.w700,
-            color: Colors.white,
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          decoration: BoxDecoration(
+            color: isActive ? AppTheme.primaryBlue : Colors.white,
+            borderRadius: BorderRadius.circular(AppTheme.radiusM),
+            border: Border.all(color: isActive ? AppTheme.primaryBlue : AppTheme.borderLight),
           ),
+          alignment: Alignment.center,
+          child: Text(label, style: GoogleFonts.poppins(
+            fontSize: 13, fontWeight: FontWeight.w500,
+            color: isActive ? Colors.white : AppTheme.textSecondary,
+          )),
         ),
       ),
     );
   }
 }
 
-// =====================================================
-// TIMETABLE TAB
-// =====================================================
+// ───────── TIMETABLE TAB ─────────
 class _TimetableTab extends StatefulWidget {
+  final DataRepository repo;
+  final SupabaseService svc;
+  final VoidCallback onRefresh;
+  const _TimetableTab({required this.repo, required this.svc, required this.onRefresh});
+
   @override
   State<_TimetableTab> createState() => _TimetableTabState();
 }
 
 class _TimetableTabState extends State<_TimetableTab> {
-  String _selectedDay = 'Mon';
-  final List<String> _days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  String _dayFilter = 'All';
+  String _search = '';
+  final _days = ['All', 'Sat', 'Sun', 'Mon', 'Tue', 'Wed', 'Thu'];
 
   @override
   Widget build(BuildContext context) {
-    final service = context.watch<SupabaseService>();
+    final all = widget.repo.getAllTimetableEntries();
+    var filtered = _dayFilter == 'All' ? all : all.where((e) => e.day == _dayFilter).toList();
+    if (_search.isNotEmpty) {
+      filtered = filtered.where((e) =>
+        e.courseCode.toLowerCase().contains(_search) ||
+        e.teacherInitial.toLowerCase().contains(_search) ||
+        e.batchId.toLowerCase().contains(_search)).toList();
+    }
+    filtered.sort((a, b) {
+      final d = a.day.compareTo(b.day);
+      return d != 0 ? d : a.start.compareTo(b.start);
+    });
 
     return Column(
       children: [
-        // Header with Add Button
-        Container(
+        // Day filter
+        SizedBox(
+          height: 48,
+          child: ListView.builder(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            itemCount: _days.length,
+            itemBuilder: (_, i) {
+              final d = _days[i];
+              final active = d == _dayFilter;
+              return Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: GestureDetector(
+                  onTap: () => setState(() => _dayFilter = d),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: active ? AppTheme.primaryBlue : Colors.white,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: active ? AppTheme.primaryBlue : AppTheme.borderLight),
+                    ),
+                    child: Text(d, style: GoogleFonts.poppins(
+                      fontSize: 13, fontWeight: FontWeight.w500,
+                      color: active ? Colors.white : AppTheme.textSecondary,
+                    )),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+
+        // Search
+        Padding(
           padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          child: TextField(
+            onChanged: (v) => setState(() => _search = v.toLowerCase()),
+            decoration: AppTheme.inputDecoration(label: 'Search by course, teacher, batch...', prefixIcon: Icons.search),
+            style: GoogleFonts.poppins(fontSize: 14),
+          ),
+        ),
+
+        // Action bar
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(
             children: [
-              Text(
-                'Manage Timetable',
-                style: GoogleFonts.poppins(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.white,
-                ),
-              ),
-              const SizedBox(height: 12),
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: [
-                    ElevatedButton.icon(
-                      onPressed: () => _showAddTimetableDialog(context),
-                      icon: const Icon(Icons.add, size: 18),
-                      label: const Text('Add Class'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF5B7CFF),
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    ElevatedButton.icon(
-                      onPressed: () => _exportTimetableToPDF(context),
-                      icon: const Icon(Icons.file_download, size: 18),
-                      label: const Text('Export'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.green,
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    ElevatedButton.icon(
-                      onPressed: () => _importTimetable(context),
-                      icon: const Icon(Icons.file_upload, size: 18),
-                      label: const Text('Import'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.orange,
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+              Text('${filtered.length} entries', style: AppTheme.caption),
+              const Spacer(),
+              _SmallBtn(icon: Icons.upload_outlined, label: 'Import', onTap: _importTimetable),
+              const SizedBox(width: 8),
+              _SmallBtn(icon: Icons.download_outlined, label: 'Export', onTap: _exportTimetable),
             ],
           ),
         ),
+        const SizedBox(height: 8),
 
-        // Day Selector
-        Container(
-          height: 50,
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: ListView.builder(
-            scrollDirection: Axis.horizontal,
-            itemCount: _days.length,
-            itemBuilder: (context, index) {
-              final day = _days[index];
-              final isSelected = day == _selectedDay;
-              return Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: ChoiceChip(
-                  label: Text(day),
-                  selected: isSelected,
-                  onSelected: (selected) {
-                    if (selected) setState(() => _selectedDay = day);
-                  },
-                  selectedColor: const Color(0xFF5B7CFF),
-                  labelStyle: GoogleFonts.poppins(
-                    color: isSelected ? Colors.white : Colors.grey[400],
-                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-                  ),
-                ),
-              );
-            },
-          ),
-        ),
-
-        const SizedBox(height: 16),
-
-        // Timetable Entries List
+        // Entry list
         Expanded(
-          child: FutureBuilder<List<TimetableEntry>>(
-            future: service.getAllTimetableEntries(),
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Center(child: CircularProgressIndicator());
-              }
+          child: filtered.isEmpty
+              ? Center(child: Text('No entries found', style: AppTheme.subtitle))
+              : ListView.builder(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 80),
+                  itemCount: filtered.length,
+                  itemBuilder: (ctx, i) {
+                    final e = filtered[i];
+                    final course = widget.repo.courseByCode(e.courseCode);
+                    final teacher = widget.repo.teacherByInitial(e.teacherInitial);
+                    final batch = widget.repo.batchById(e.batchId);
+                    final room = widget.repo.roomById(e.roomId);
 
-              if (snapshot.hasError) {
-                return Center(
-                  child: Text(
-                    'Error: ${snapshot.error}',
-                    style: GoogleFonts.poppins(color: Colors.red),
-                  ),
-                );
-              }
-
-              final allEntries = snapshot.data ?? [];
-              final dayEntries = allEntries
-                  .where((entry) => entry.day == _selectedDay)
-                  .toList()
-                ..sort((a, b) => a.start.compareTo(b.start));
-
-              if (dayEntries.isEmpty) {
-                return Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(Icons.calendar_today, size: 64, color: Colors.grey),
-                      const SizedBox(height: 16),
-                      Text(
-                        'No classes scheduled for $_selectedDay',
-                        style: GoogleFonts.poppins(
-                          fontSize: 18,
-                          color: Colors.grey,
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      decoration: AppTheme.cleanCardDecoration,
+                      child: ListTile(
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        leading: Container(
+                          width: 4,
+                          height: 48,
+                          decoration: BoxDecoration(
+                            color: AppTheme.typeColor(e.type),
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                        ),
+                        title: Text(
+                          '${course?.title ?? e.courseCode} (${e.courseCode})',
+                          style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w600, color: AppTheme.textPrimary),
+                          maxLines: 1, overflow: TextOverflow.ellipsis,
+                        ),
+                        subtitle: Text(
+                          '${e.day} • ${e.start}-${e.end} • ${teacher?.name ?? e.teacherInitial} • ${batch?.name ?? e.batchId}${room != null ? ' • ${room.name}' : ''}',
+                          style: AppTheme.caption,
+                          maxLines: 1, overflow: TextOverflow.ellipsis,
+                        ),
+                        trailing: PopupMenuButton<String>(
+                          onSelected: (v) {
+                            if (v == 'edit') _editEntry(e);
+                            if (v == 'delete') _confirmDeleteEntry(e);
+                          },
+                          itemBuilder: (_) => [
+                            const PopupMenuItem(value: 'edit', child: Text('Edit')),
+                            PopupMenuItem(value: 'delete', child: Text('Delete', style: TextStyle(color: AppTheme.errorRed))),
+                          ],
                         ),
                       ),
-                      const SizedBox(height: 8),
-                      TextButton(
-                        onPressed: () => _showAddTimetableDialog(context),
-                        child: const Text('Add a Class'),
-                      ),
-                    ],
-                  ),
-                );
-              }
+                    );
+                  },
+                ),
+        ),
 
-              return ListView.builder(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                itemCount: dayEntries.length,
-                itemBuilder: (context, index) {
-                  final entry = dayEntries[index];
-                  return _TimetableEntryCard(
-                    entry: entry,
-                    onEdit: () => _showEditTimetableDialog(context, entry),
-                    onDelete: () => _deleteTimetableEntry(context, entry),
-                  );
-                },
-              );
-            },
+        // FAB to add
+        Padding(
+          padding: const EdgeInsets.only(bottom: 16, right: 16),
+          child: Align(
+            alignment: Alignment.bottomRight,
+            child: FloatingActionButton(
+              heroTag: 'addEntry',
+              backgroundColor: AppTheme.primaryBlue,
+              foregroundColor: Colors.white,
+              onPressed: _addEntry,
+              child: const Icon(Icons.add),
+            ),
           ),
         ),
       ],
     );
   }
 
-  void _showAddTimetableDialog(BuildContext context) {
-    final service = context.read<SupabaseService>();
-    
-    String? selectedBatchId;
-    String? selectedTeacherInitial;
-    String? selectedCourseCode;
-    String? selectedType;
-    String? selectedMode;
-    String? selectedRoomId;
-    String? selectedGroup = 'None';
-    TimeOfDay? startTime;
-    TimeOfDay? endTime;
-
-    final types = ['Lecture', 'Tutorial', 'Sessional', 'Online'];
-    final modes = ['Onsite', 'Online'];
-    final groups = ['None', 'G-1', 'G-2'];
-
-    showDialog(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setState) => AlertDialog(
-          backgroundColor: const Color(0xFF1E1E1E),
-          title: Text(
-            'Add New Class',
-            style: GoogleFonts.poppins(color: Colors.white),
-          ),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // Day selector
-                DropdownButtonFormField<String>(
-                  value: _selectedDay,
-                  isExpanded: true,
-                  decoration: const InputDecoration(labelText: 'Day'),
-                  dropdownColor: const Color(0xFF2A2A2A),
-                  items: _days.map((day) => DropdownMenuItem(
-                        value: day,
-                        child: Text(day, style: GoogleFonts.poppins(color: Colors.white)),
-                      )).toList(),
-                  onChanged: (value) {
-                    setState(() => _selectedDay = value!);
-                  },
-                ),
-                const SizedBox(height: 16),
-
-                // Batch selector
-                FutureBuilder<List<Batch>>(
-                  future: service.getBatches(),
-                  builder: (context, snapshot) {
-                    if (!snapshot.hasData) return const CircularProgressIndicator();
-                    final batches = snapshot.data!;
-                    return DropdownButtonFormField<String>(
-                      value: selectedBatchId,
-                      isExpanded: true,
-                      decoration: const InputDecoration(labelText: 'Batch *'),
-                      dropdownColor: const Color(0xFF2A2A2A),
-                      items: batches.map((batch) => DropdownMenuItem(
-                            value: batch.id,
-                            child: Text(
-                              '${batch.name} (${batch.session})',
-                              style: GoogleFonts.poppins(color: Colors.white),
-                            ),
-                          )).toList(),
-                      onChanged: (value) {
-                        setState(() => selectedBatchId = value);
-                      },
-                    );
-                  },
-                ),
-                const SizedBox(height: 16),
-
-                // Teacher selector
-                FutureBuilder<List<Teacher>>(
-                  future: service.getTeachers(),
-                  builder: (context, snapshot) {
-                    if (!snapshot.hasData) return const CircularProgressIndicator();
-                    final teachers = snapshot.data!;
-                    return DropdownButtonFormField<String>(
-                      value: selectedTeacherInitial,
-                      isExpanded: true,
-                      decoration: const InputDecoration(labelText: 'Teacher *'),
-                      dropdownColor: const Color(0xFF2A2A2A),
-                      items: teachers.map((teacher) => DropdownMenuItem(
-                            value: teacher.initial,
-                            child: Text(
-                              '${teacher.name} (${teacher.initial})',
-                              style: GoogleFonts.poppins(color: Colors.white),
-                            ),
-                          )).toList(),
-                      onChanged: (value) {
-                        setState(() => selectedTeacherInitial = value);
-                      },
-                    );
-                  },
-                ),
-                const SizedBox(height: 16),
-
-                // Course selector
-                FutureBuilder<List<Course>>(
-                  future: service.getCourses(),
-                  builder: (context, snapshot) {
-                    if (!snapshot.hasData) return const CircularProgressIndicator();
-                    final courses = snapshot.data!;
-                    return DropdownButtonFormField<String>(
-                      value: selectedCourseCode,
-                      isExpanded: true,
-                      decoration: const InputDecoration(labelText: 'Course *'),
-                      dropdownColor: const Color(0xFF2A2A2A),
-                      items: courses.map((course) => DropdownMenuItem(
-                            value: course.code,
-                            child: Text(
-                              '${course.code} - ${course.title}',
-                              style: GoogleFonts.poppins(color: Colors.white),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          )).toList(),
-                      onChanged: (value) {
-                        setState(() => selectedCourseCode = value);
-                      },
-                    );
-                  },
-                ),
-                const SizedBox(height: 16),
-
-                // Type selector
-                DropdownButtonFormField<String>(
-                  value: selectedType,
-                  isExpanded: true,
-                  decoration: const InputDecoration(labelText: 'Type *'),
-                  dropdownColor: const Color(0xFF2A2A2A),
-                  items: types.map((type) => DropdownMenuItem(
-                        value: type,
-                        child: Text(type, style: GoogleFonts.poppins(color: Colors.white)),
-                      )).toList(),
-                  onChanged: (value) {
-                    setState(() => selectedType = value);
-                  },
-                ),
-                const SizedBox(height: 16),
-
-                // Mode selector
-                DropdownButtonFormField<String>(
-                  value: selectedMode,
-                  isExpanded: true,
-                  decoration: const InputDecoration(labelText: 'Mode *'),
-                  dropdownColor: const Color(0xFF2A2A2A),
-                  items: modes.map((mode) => DropdownMenuItem(
-                        value: mode,
-                        child: Text(mode, style: GoogleFonts.poppins(color: Colors.white)),
-                      )).toList(),
-                  onChanged: (value) {
-                    setState(() {
-                      selectedMode = value;
-                      if (value == 'Online') selectedRoomId = null;
-                    });
-                  },
-                ),
-                const SizedBox(height: 16),
-
-                // Room selector (if Onsite)
-                if (selectedMode == 'Onsite')
-                  FutureBuilder<List<Room>>(
-                    future: service.getRooms(),
-                    builder: (context, snapshot) {
-                      if (!snapshot.hasData) return const CircularProgressIndicator();
-                      final rooms = snapshot.data!;
-                      return DropdownButtonFormField<String>(
-                        value: selectedRoomId,
-                        isExpanded: true,
-                        decoration: const InputDecoration(labelText: 'Room'),
-                        dropdownColor: const Color(0xFF2A2A2A),
-                        items: rooms.map((room) => DropdownMenuItem(
-                              value: room.id,
-                              child: Text(room.name, style: GoogleFonts.poppins(color: Colors.white)),
-                            )).toList(),
-                        onChanged: (value) {
-                          setState(() => selectedRoomId = value);
-                        },
-                      );
-                    },
-                  ),
-                const SizedBox(height: 16),
-
-                // Group selector
-                DropdownButtonFormField<String>(
-                  value: selectedGroup,
-                  isExpanded: true,
-                  decoration: const InputDecoration(labelText: 'Group'),
-                  dropdownColor: const Color(0xFF2A2A2A),
-                  items: groups.map((group) => DropdownMenuItem(
-                        value: group,
-                        child: Text(group, style: GoogleFonts.poppins(color: Colors.white)),
-                      )).toList(),
-                  onChanged: (value) {
-                    setState(() => selectedGroup = value);
-                  },
-                ),
-                const SizedBox(height: 16),
-
-                // Time pickers
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: () async {
-                          final time = await showTimePicker(
-                            context: context,
-                            initialTime: startTime ?? TimeOfDay.now(),
-                          );
-                          if (time != null) {
-                            setState(() => startTime = time);
-                          }
-                        },
-                        icon: const Icon(Icons.access_time),
-                        label: Text(startTime == null
-                            ? 'Start Time *'
-                            : '${startTime!.hour.toString().padLeft(2, '0')}:${startTime!.minute.toString().padLeft(2, '0')}'),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: () async {
-                          final time = await showTimePicker(
-                            context: context,
-                            initialTime: endTime ?? TimeOfDay.now(),
-                          );
-                          if (time != null) {
-                            setState(() => endTime = time);
-                          }
-                        },
-                        icon: const Icon(Icons.access_time),
-                        label: Text(endTime == null
-                            ? 'End Time *'
-                            : '${endTime!.hour.toString().padLeft(2, '0')}:${endTime!.minute.toString().padLeft(2, '0')}'),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                if (selectedBatchId == null || selectedTeacherInitial == null ||
-                    selectedCourseCode == null || selectedType == null ||
-                    selectedMode == null || startTime == null || endTime == null) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Please fill all required fields')),
-                  );
-                  return;
-                }
-
-                final entry = TimetableEntry(
-                  day: _selectedDay,
-                  batchId: selectedBatchId!,
-                  teacherInitial: selectedTeacherInitial!,
-                  courseCode: selectedCourseCode!,
-                  type: selectedType!,
-                  mode: selectedMode!,
-                  roomId: selectedMode == 'Online' ? null : selectedRoomId,
-                  group: selectedGroup == 'None' ? null : selectedGroup,
-                  start: '${startTime!.hour.toString().padLeft(2, '0')}:${startTime!.minute.toString().padLeft(2, '0')}',
-                  end: '${endTime!.hour.toString().padLeft(2, '0')}:${endTime!.minute.toString().padLeft(2, '0')}',
-                );
-
-                final success = await service.addTimetableEntry(entry);
-
-                if (context.mounted) {
-                  Navigator.pop(context);
-                  if (success) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Class added successfully')),
-                    );
-                    this.setState(() {});
-                  } else {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Failed to add class')),
-                    );
-                  }
-                }
-              },
-              child: const Text('Add'),
-            ),
-          ],
-        ),
-      ),
+  void _addEntry() async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => AddEditScheduleScreen(repo: widget.repo)),
     );
+    if (result == true) widget.onRefresh();
   }
 
-  void _showEditTimetableDialog(BuildContext context, TimetableEntry entry) async {
-    final service = context.read<SupabaseService>();
-    
-    // Get the entry ID
-    final entryId = await service.getTimetableEntryId(entry);
-    if (entryId == null) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not find entry ID')),
-        );
-      }
-      return;
-    }
-
-    String selectedDay = entry.day;
-    String? selectedBatchId = entry.batchId;
-    String? selectedTeacherInitial = entry.teacherInitial;
-    String? selectedCourseCode = entry.courseCode;
-    String? selectedType = entry.type;
-    String? selectedMode = entry.mode;
-    String? selectedRoomId = entry.roomId;
-    String? selectedGroup = entry.group ?? 'None';
-    
-    final startParts = entry.start.split(':');
-    TimeOfDay? startTime = TimeOfDay(
-      hour: int.parse(startParts[0]),
-      minute: int.parse(startParts[1]),
+  void _editEntry(TimetableEntry entry) async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => AddEditScheduleScreen(repo: widget.repo, existing: entry)),
     );
-    final endParts = entry.end.split(':');
-    TimeOfDay? endTime = TimeOfDay(
-      hour: int.parse(endParts[0]),
-      minute: int.parse(endParts[1]),
-    );
-
-    final types = ['Lecture', 'Tutorial', 'Sessional', 'Online'];
-    final modes = ['Onsite', 'Online'];
-    final groups = ['None', 'G-1', 'G-2'];
-
-    if (!context.mounted) return;
-
-    showDialog(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setState) => AlertDialog(
-          backgroundColor: const Color(0xFF1E1E1E),
-          title: Text(
-            'Edit Class',
-            style: GoogleFonts.poppins(color: Colors.white),
-          ),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // Day selector
-                DropdownButtonFormField<String>(
-                  value: selectedDay,
-                  isExpanded: true,
-                  decoration: const InputDecoration(labelText: 'Day'),
-                  dropdownColor: const Color(0xFF2A2A2A),
-                  items: _days.map((day) => DropdownMenuItem(
-                        value: day,
-                        child: Text(day, style: GoogleFonts.poppins(color: Colors.white)),
-                      )).toList(),
-                  onChanged: (value) {
-                    setState(() => selectedDay = value!);
-                  },
-                ),
-                const SizedBox(height: 16),
-
-                // Batch selector
-                FutureBuilder<List<Batch>>(
-                  future: service.getBatches(),
-                  builder: (context, snapshot) {
-                    if (!snapshot.hasData) return const CircularProgressIndicator();
-                    final batches = snapshot.data!;
-                    return DropdownButtonFormField<String>(
-                      value: selectedBatchId,
-                      isExpanded: true,
-                      decoration: const InputDecoration(labelText: 'Batch *'),
-                      dropdownColor: const Color(0xFF2A2A2A),
-                      items: batches.map((batch) => DropdownMenuItem(
-                            value: batch.id,
-                            child: Text(
-                              '${batch.name} (${batch.session})',
-                              style: GoogleFonts.poppins(color: Colors.white),
-                            ),
-                          )).toList(),
-                      onChanged: (value) {
-                        setState(() => selectedBatchId = value);
-                      },
-                    );
-                  },
-                ),
-                const SizedBox(height: 16),
-
-                // Teacher selector
-                FutureBuilder<List<Teacher>>(
-                  future: service.getTeachers(),
-                  builder: (context, snapshot) {
-                    if (!snapshot.hasData) return const CircularProgressIndicator();
-                    final teachers = snapshot.data!;
-                    return DropdownButtonFormField<String>(
-                      value: selectedTeacherInitial,
-                      decoration: const InputDecoration(labelText: 'Teacher *'),
-                      dropdownColor: const Color(0xFF2A2A2A),
-                      items: teachers.map((teacher) => DropdownMenuItem(
-                            value: teacher.initial,
-                            child: Text(
-                              '${teacher.name} (${teacher.initial})',
-                              style: GoogleFonts.poppins(color: Colors.white),
-                            ),
-                          )).toList(),
-                      onChanged: (value) {
-                        setState(() => selectedTeacherInitial = value);
-                      },
-                    );
-                  },
-                ),
-                const SizedBox(height: 16),
-
-                // Course selector
-                FutureBuilder<List<Course>>(
-                  future: service.getCourses(),
-                  builder: (context, snapshot) {
-                    if (!snapshot.hasData) return const CircularProgressIndicator();
-                    final courses = snapshot.data!;
-                    return DropdownButtonFormField<String>(
-                      value: selectedCourseCode,
-                      decoration: const InputDecoration(labelText: 'Course *'),
-                      dropdownColor: const Color(0xFF2A2A2A),
-                      items: courses.map((course) => DropdownMenuItem(
-                            value: course.code,
-                            child: Text(
-                              '${course.code} - ${course.title}',
-                              style: GoogleFonts.poppins(color: Colors.white),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          )).toList(),
-                      onChanged: (value) {
-                        setState(() => selectedCourseCode = value);
-                      },
-                    );
-                  },
-                ),
-                const SizedBox(height: 16),
-
-                // Type selector
-                DropdownButtonFormField<String>(
-                  value: selectedType,
-                  decoration: const InputDecoration(labelText: 'Type *'),
-                  dropdownColor: const Color(0xFF2A2A2A),
-                  items: types.map((type) => DropdownMenuItem(
-                        value: type,
-                        child: Text(type, style: GoogleFonts.poppins(color: Colors.white)),
-                      )).toList(),
-                  onChanged: (value) {
-                    setState(() => selectedType = value);
-                  },
-                ),
-                const SizedBox(height: 16),
-
-                // Mode selector
-                DropdownButtonFormField<String>(
-                  value: selectedMode,
-                  decoration: const InputDecoration(labelText: 'Mode *'),
-                  dropdownColor: const Color(0xFF2A2A2A),
-                  items: modes.map((mode) => DropdownMenuItem(
-                        value: mode,
-                        child: Text(mode, style: GoogleFonts.poppins(color: Colors.white)),
-                      )).toList(),
-                  onChanged: (value) {
-                    setState(() {
-                      selectedMode = value;
-                      if (value == 'Online') selectedRoomId = null;
-                    });
-                  },
-                ),
-                const SizedBox(height: 16),
-
-                // Room selector (if Onsite)
-                if (selectedMode == 'Onsite')
-                  FutureBuilder<List<Room>>(
-                    future: service.getRooms(),
-                    builder: (context, snapshot) {
-                      if (!snapshot.hasData) return const CircularProgressIndicator();
-                      final rooms = snapshot.data!;
-                      return DropdownButtonFormField<String>(
-                        value: selectedRoomId,
-                        decoration: const InputDecoration(labelText: 'Room'),
-                        dropdownColor: const Color(0xFF2A2A2A),
-                        items: rooms.map((room) => DropdownMenuItem(
-                              value: room.id,
-                              child: Text(room.name, style: GoogleFonts.poppins(color: Colors.white)),
-                            )).toList(),
-                        onChanged: (value) {
-                          setState(() => selectedRoomId = value);
-                        },
-                      );
-                    },
-                  ),
-                const SizedBox(height: 16),
-
-                // Group selector
-                DropdownButtonFormField<String>(
-                  value: selectedGroup,
-                  decoration: const InputDecoration(labelText: 'Group'),
-                  dropdownColor: const Color(0xFF2A2A2A),
-                  items: groups.map((group) => DropdownMenuItem(
-                        value: group,
-                        child: Text(group, style: GoogleFonts.poppins(color: Colors.white)),
-                      )).toList(),
-                  onChanged: (value) {
-                    setState(() => selectedGroup = value);
-                  },
-                ),
-                const SizedBox(height: 16),
-
-                // Time pickers
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: () async {
-                          final time = await showTimePicker(
-                            context: context,
-                            initialTime: startTime!,
-                          );
-                          if (time != null) {
-                            setState(() => startTime = time);
-                          }
-                        },
-                        icon: const Icon(Icons.access_time),
-                        label: Text(
-                          '${startTime!.hour.toString().padLeft(2, '0')}:${startTime!.minute.toString().padLeft(2, '0')}'
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: () async {
-                          final time = await showTimePicker(
-                            context: context,
-                            initialTime: endTime!,
-                          );
-                          if (time != null) {
-                            setState(() => endTime = time);
-                          }
-                        },
-                        icon: const Icon(Icons.access_time),
-                        label: Text(
-                          '${endTime!.hour.toString().padLeft(2, '0')}:${endTime!.minute.toString().padLeft(2, '0')}'
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                final updatedEntry = TimetableEntry(
-                  day: selectedDay,
-                  batchId: selectedBatchId!,
-                  teacherInitial: selectedTeacherInitial!,
-                  courseCode: selectedCourseCode!,
-                  type: selectedType!,
-                  mode: selectedMode!,
-                  roomId: selectedMode == 'Online' ? null : selectedRoomId,
-                  group: selectedGroup == 'None' ? null : selectedGroup,
-                  start: '${startTime!.hour.toString().padLeft(2, '0')}:${startTime!.minute.toString().padLeft(2, '0')}',
-                  end: '${endTime!.hour.toString().padLeft(2, '0')}:${endTime!.minute.toString().padLeft(2, '0')}',
-                );
-
-                final success = await service.updateTimetableEntry(entryId, updatedEntry);
-
-                if (context.mounted) {
-                  Navigator.pop(context);
-                  if (success) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Class updated successfully')),
-                    );
-                    this.setState(() {});
-                  } else {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Failed to update class')),
-                    );
-                  }
-                }
-              },
-              child: const Text('Update'),
-            ),
-          ],
-        ),
-      ),
-    );
+    if (result == true) widget.onRefresh();
   }
 
-  void _deleteTimetableEntry(BuildContext context, TimetableEntry entry) async {
-    final confirm = await showDialog<bool>(
+  void _confirmDeleteEntry(TimetableEntry e) {
+    showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1E1E1E),
-        title: Text('Delete Class?', style: GoogleFonts.poppins(color: Colors.white)),
-        content: Text(
-          'Are you sure you want to delete this class?',
-          style: GoogleFonts.poppins(color: Colors.white70),
-        ),
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppTheme.radiusL)),
+        title: Text('Delete Entry', style: AppTheme.heading3),
+        content: Text('Remove ${e.courseCode} on ${e.day} ${e.start}-${e.end}?', style: AppTheme.body),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.errorRed),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              await widget.repo.removeTimetableEntry(e);
+              widget.onRefresh();
+            },
             child: const Text('Delete'),
           ),
         ],
       ),
     );
-
-    if (confirm == true && context.mounted) {
-      final service = context.read<SupabaseService>();
-      
-      // Get the entry ID
-      final entryId = await service.getTimetableEntryId(entry);
-      if (entryId == null) {
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Could not find entry ID')),
-          );
-        }
-        return;
-      }
-
-      final success = await service.deleteTimetableEntry(entryId);
-
-      if (context.mounted) {
-        if (success) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Class deleted successfully')),
-          );
-          setState(() {});
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Failed to delete class')),
-          );
-        }
-      }
-    }
   }
 
-  Future<void> _exportTimetableToPDF(BuildContext context) async {
-    final service = context.read<SupabaseService>();
-    
-    try {
-      final entries = await service.getAllTimetableEntries();
-      final timetableEntries = (entries as List)
-          .map((e) => TimetableEntry.fromJson(e))
-          .toList();
-
-      final pdf = pw.Document();
-
-      // Create PDF with all timetable entries
-      pdf.addPage(
-        pw.MultiPage(
-          pageFormat: PdfPageFormat.a4,
-          margin: const pw.EdgeInsets.all(32),
-          build: (context) => [
-            pw.Header(
-              level: 0,
-              child: pw.Text(
-                'Class Timetable',
-                style: pw.TextStyle(
-                  fontSize: 24,
-                  fontWeight: pw.FontWeight.bold,
-                ),
-              ),
-            ),
-            pw.SizedBox(height: 20),
-            pw.Text(
-              'Generated on: ${DateTime.now().toString().split('.')[0]}',
-              style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey),
-            ),
-            pw.SizedBox(height: 20),
-            ..._buildTimetablePDF(timetableEntries),
-          ],
-        ),
-      );
-
-      // Save and share PDF
-      await Printing.sharePdf(
-        bytes: await pdf.save(),
-        filename: 'timetable_${DateTime.now().millisecondsSinceEpoch}.pdf',
-      );
-
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Timetable exported successfully')),
-        );
-      }
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error exporting PDF: $e')),
-        );
-      }
-    }
-  }
-
-  List<pw.Widget> _buildTimetablePDF(List<TimetableEntry> entries) {
-    final dayEntries = <String, List<TimetableEntry>>{};
-    
-    for (var entry in entries) {
-      if (!dayEntries.containsKey(entry.day)) {
-        dayEntries[entry.day] = [];
-      }
-      dayEntries[entry.day]!.add(entry);
-    }
-
-    final days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    final widgets = <pw.Widget>[];
-
-    for (var day in days) {
-      if (dayEntries[day]?.isNotEmpty ?? false) {
-        widgets.add(
-          pw.Padding(
-            padding: const pw.EdgeInsets.symmetric(vertical: 10),
-            child: pw.Column(
-              crossAxisAlignment: pw.CrossAxisAlignment.start,
-              children: [
-                pw.Text(
-                  day,
-                  style: pw.TextStyle(
-                    fontSize: 14,
-                    fontWeight: pw.FontWeight.bold,
-                  ),
-                ),
-                pw.SizedBox(height: 8),
-                pw.Table(
-                  border: pw.TableBorder.all(color: PdfColors.grey300, width: 0.5),
-                  children: [
-                    // Header row
-                    pw.TableRow(
-                      children: [
-                        _buildPDFTableCell('Batch', bold: true),
-                        _buildPDFTableCell('Course', bold: true),
-                        _buildPDFTableCell('Type', bold: true),
-                        _buildPDFTableCell('Time', bold: true),
-                        _buildPDFTableCell('Mode', bold: true),
-                        _buildPDFTableCell('Teacher', bold: true),
-                      ],
-                    ),
-                    // Data rows
-                    ...dayEntries[day]!.map((entry) => pw.TableRow(
-                      children: [
-                        _buildPDFTableCell(entry.batchId),
-                        _buildPDFTableCell(entry.courseCode),
-                        _buildPDFTableCell(entry.type),
-                        _buildPDFTableCell('${entry.start} - ${entry.end}'),
-                        _buildPDFTableCell(entry.mode),
-                        _buildPDFTableCell(entry.teacherInitial),
-                      ],
-                    )).toList(),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        );
-      }
-    }
-
-    return widgets;
-  }
-
-  pw.Widget _buildPDFTableCell(String text, {bool bold = false}) {
-    return pw.Padding(
-      padding: const pw.EdgeInsets.all(6),
-      child: pw.Text(
-        text,
-        style: pw.TextStyle(
-          fontSize: 9,
-          fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal,
-        ),
-      ),
+  void _exportTimetable() {
+    final entries = widget.repo.getAllTimetableEntries();
+    final jsonStr = TimetableExportImport.toJSON(entries);
+    Clipboard.setData(ClipboardData(text: jsonStr));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Timetable JSON copied to clipboard'), backgroundColor: AppTheme.successGreen),
     );
   }
 
-  Future<void> _importTimetable(BuildContext context) async {
-    try {
-      final result = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['json', 'csv'],
-      );
-
-      if (result != null && result.files.isNotEmpty) {
-        final file = File(result.files.first.path!);
-        final content = await file.readAsString();
-
-        if (result.files.first.extension == 'json') {
-          await _importFromJSON(context, content);
-        } else if (result.files.first.extension == 'csv') {
-          await _importFromCSV(context, content);
-        }
-      }
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error importing file: $e')),
-        );
-      }
-    }
-  }
-
-  Future<void> _importFromJSON(BuildContext context, String content) async {
-    try {
-      final service = context.read<SupabaseService>();
-      final json = jsonDecode(content);
-      
-      List<dynamic> entries = [];
-      if (json is List) {
-        entries = json;
-      } else if (json is Map && json.containsKey('entries')) {
-        entries = json['entries'] as List;
-      }
-
-      if (entries.isEmpty) {
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('No entries found in JSON file')),
-          );
-        }
-        return;
-      }
-
-      // Show confirmation dialog
-      if (context.mounted) {
-        final confirm = await showDialog<bool>(
-          context: context,
-          builder: (context) => AlertDialog(
-            backgroundColor: const Color(0xFF1E1E1E),
-            title: Text(
-              'Import Timetable',
-              style: GoogleFonts.poppins(color: Colors.white),
-            ),
-            content: Text(
-              'Found ${entries.length} entries. Do you want to add them to the timetable?\n\nNote: This will add these entries to existing data.',
-              style: GoogleFonts.poppins(color: Colors.white70),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('Cancel'),
-              ),
-              ElevatedButton(
-                onPressed: () => Navigator.pop(context, true),
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-                child: const Text('Import'),
+  void _importTimetable() {
+    final ctrl = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppTheme.radiusL)),
+        title: Text('Import Timetable JSON', style: AppTheme.heading3),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Paste JSON data below:', style: AppTheme.caption),
+              const SizedBox(height: 8),
+              TextField(
+                controller: ctrl,
+                maxLines: 8,
+                decoration: AppTheme.inputDecoration(label: 'JSON data'),
+                style: GoogleFonts.poppins(fontSize: 12),
               ),
             ],
           ),
-        );
-
-        if (confirm != true) return;
-      }
-
-      int successCount = 0;
-      int failCount = 0;
-
-      for (var entry in entries) {
-        try {
-          final timetableEntry = TimetableEntry.fromJson(entry as Map<String, dynamic>);
-          await service.addTimetableEntry(timetableEntry);
-          successCount++;
-        } catch (e) {
-          failCount++;
-        }
-      }
-
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Imported: $successCount | Failed: $failCount'),
-            backgroundColor: failCount == 0 ? Colors.green : Colors.orange,
-          ),
-        );
-        // Refresh the timetable view
-        setState(() {});
-      }
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error parsing JSON: $e')),
-        );
-      }
-    }
-  }
-
-  Future<void> _importFromCSV(BuildContext context, String content) async {
-    try {
-      final service = context.read<SupabaseService>();
-      final lines = content.split('\n').where((line) => line.trim().isNotEmpty).toList();
-      
-      if (lines.isEmpty) {
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('CSV file is empty')),
-          );
-        }
-        return;
-      }
-
-      // Skip header row
-      final entries = lines.skip(1).toList();
-
-      if (entries.isEmpty) {
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('No data rows in CSV')),
-          );
-        }
-        return;
-      }
-
-      // Show confirmation dialog
-      if (context.mounted) {
-        final confirm = await showDialog<bool>(
-          context: context,
-          builder: (context) => AlertDialog(
-            backgroundColor: const Color(0xFF1E1E1E),
-            title: Text(
-              'Import Timetable',
-              style: GoogleFonts.poppins(color: Colors.white),
-            ),
-            content: Text(
-              'Found ${entries.length} entries. Do you want to add them to the timetable?\n\nExpected CSV format:\nday,batchId,teacherInitial,courseCode,type,mode,start,end,roomId',
-              style: GoogleFonts.poppins(color: Colors.white70),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('Cancel'),
-              ),
-              ElevatedButton(
-                onPressed: () => Navigator.pop(context, true),
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-                child: const Text('Import'),
-              ),
-            ],
-          ),
-        );
-
-        if (confirm != true) return;
-      }
-
-      int successCount = 0;
-      int failCount = 0;
-
-      for (var line in entries) {
-        try {
-          final parts = line.split(',').map((s) => s.trim()).toList();
-          if (parts.length < 8) continue;
-
-          final timetableEntry = TimetableEntry(
-            day: parts[0],
-            batchId: parts[1],
-            teacherInitial: parts[2],
-            courseCode: parts[3],
-            type: parts[4],
-            mode: parts[5],
-            start: parts[6],
-            end: parts[7],
-            roomId: parts.length > 8 ? parts[8] : null,
-          );
-
-          await service.addTimetableEntry(timetableEntry);
-          successCount++;
-        } catch (e) {
-          failCount++;
-        }
-      }
-
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Imported: $successCount | Failed: $failCount'),
-            backgroundColor: failCount == 0 ? Colors.green : Colors.orange,
-          ),
-        );
-        // Refresh the timetable view
-        setState(() {});
-      }
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error parsing CSV: $e')),
-        );
-      }
-    }
-  }
-}
-
-class _TimetableEntryCard extends StatelessWidget {
-  final TimetableEntry entry;
-  final VoidCallback onEdit;
-  final VoidCallback onDelete;
-
-  const _TimetableEntryCard({
-    required this.entry,
-    required this.onEdit,
-    required this.onDelete,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final service = context.read<SupabaseService>();
-
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF4ECDC4).withOpacity(0.2),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Text(
-                    '${entry.start} - ${entry.end}',
-                    style: GoogleFonts.poppins(
-                      color: const Color(0xFF4ECDC4),
-                      fontWeight: FontWeight.w600,
-                      fontSize: 12,
-                    ),
-                  ),
-                ),
-                const Spacer(),
-                IconButton(
-                  icon: const Icon(Icons.edit, color: Color(0xFF5B7CFF), size: 20),
-                  onPressed: onEdit,
-                ),
-                IconButton(
-                  icon: const Icon(Icons.delete, color: Colors.red, size: 20),
-                  onPressed: onDelete,
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            
-            // Course info
-            FutureBuilder<Course?>(
-              future: service.getCourseByCode(entry.courseCode),
-              builder: (context, snapshot) {
-                final course = snapshot.data;
-                return Text(
-                  course?.title ?? entry.courseCode,
-                  style: GoogleFonts.poppins(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.white,
-                  ),
-                );
-              },
-            ),
-            const SizedBox(height: 4),
-            Text(
-              entry.courseCode,
-              style: GoogleFonts.poppins(
-                fontSize: 12,
-                color: Colors.grey[400],
-              ),
-            ),
-            const SizedBox(height: 12),
-            
-            // Details
-            Wrap(
-              spacing: 12,
-              runSpacing: 8,
-              children: [
-                _DetailChip(
-                  icon: Icons.person,
-                  label: entry.teacherInitial,
-                  color: const Color(0xFFFF6B6B),
-                ),
-                _DetailChip(
-                  icon: Icons.group_work,
-                  label: entry.batchId,
-                  color: const Color(0xFF5B7CFF),
-                ),
-                _DetailChip(
-                  icon: Icons.class_,
-                  label: entry.type,
-                  color: const Color(0xFF8A5BFF),
-                ),
-                if (entry.mode == 'Online')
-                  _DetailChip(
-                    icon: Icons.wifi,
-                    label: 'Online',
-                    color: const Color(0xFF4ECDC4),
-                  )
-                else if (entry.roomId != null)
-                  _DetailChip(
-                    icon: Icons.room,
-                    label: entry.roomId!,
-                    color: const Color(0xFFFFA726),
-                  ),
-                if (entry.group != null)
-                  _DetailChip(
-                    icon: Icons.people,
-                    label: entry.group!,
-                    color: const Color(0xFFAB47BC),
-                  ),
-              ],
-            ),
-          ],
         ),
-      ),
-    );
-  }
-}
-
-class _DetailChip extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final Color color;
-
-  const _DetailChip({
-    required this.icon,
-    required this.label,
-    required this.color,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.2),
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 14, color: color),
-          const SizedBox(width: 4),
-          Text(
-            label,
-            style: GoogleFonts.poppins(
-              fontSize: 11,
-              color: color,
-              fontWeight: FontWeight.w500,
-            ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              await _processImport(ctrl.text);
+            },
+            child: const Text('Import'),
           ),
         ],
       ),
     );
   }
+
+  Future<void> _processImport(String jsonStr) async {
+    try {
+      final decoded = jsonDecode(jsonStr);
+      final List<dynamic> entriesJson = decoded['entries'];
+      final entries = entriesJson.map((e) => TimetableEntry.fromJson(e)).toList();
+      final errors = TimetableExportImport.validateEntries(entries);
+      if (errors.isNotEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Validation errors: ${errors.first}'),
+            backgroundColor: AppTheme.errorRed,
+          ));
+        }
+        return;
+      }
+      int added = 0;
+      for (final e in entries) {
+        await widget.svc.addTimetableEntry(e);
+        added++;
+      }
+      widget.onRefresh();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Imported $added entries successfully'),
+          backgroundColor: AppTheme.successGreen,
+        ));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Import failed: $e'),
+          backgroundColor: AppTheme.errorRed,
+        ));
+      }
+    }
+  }
 }
 
-// =====================================================
-// ANALYTICS TAB
-// =====================================================
-class _AnalyticsTab extends StatefulWidget {
-  @override
-  State<_AnalyticsTab> createState() => _AnalyticsTabState();
-}
+class _SmallBtn extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  const _SmallBtn({required this.icon, required this.label, required this.onTap});
 
-class _AnalyticsTabState extends State<_AnalyticsTab> {
   @override
   Widget build(BuildContext context) {
-    final service = SupabaseService();
-    
-    return FutureBuilder(
-      future: Future.wait([
-        service.getAllTimetableEntries(),
-      ]),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(AppTheme.radiusS),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: AppTheme.primaryBlueLight,
+          borderRadius: BorderRadius.circular(AppTheme.radiusS),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 16, color: AppTheme.primaryBlue),
+            const SizedBox(width: 4),
+            Text(label, style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w500, color: AppTheme.primaryBlue)),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
-        if (snapshot.hasError) {
-          return Center(child: Text('Error: ${snapshot.error}'));
-        }
+// ───────── ACADEMIC TAB ─────────
+class _AcademicTab extends StatefulWidget {
+  final DataRepository repo;
+  final SupabaseService svc;
+  final VoidCallback onRefresh;
+  const _AcademicTab({required this.repo, required this.svc, required this.onRefresh});
 
-        final timetableEntries = snapshot.data![0] as List;
+  @override
+  State<_AcademicTab> createState() => _AcademicTabState();
+}
 
-        // Convert to TimetableEntry objects
-        final entries = timetableEntries
-            .map((e) => TimetableEntry.fromJson(e))
-            .toList();
+class _AcademicTabState extends State<_AcademicTab> {
+  int _section = 0; // 0=courses, 1=rooms
+  String _search = '';
 
-        return SingleChildScrollView(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        // Section pills
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+          child: Row(
             children: [
-              Text(
-                'Analytics Dashboard',
-                style: GoogleFonts.poppins(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
+              _SectionPill(label: 'Courses', isActive: _section == 0, onTap: () => setState(() => _section = 0)),
+              const SizedBox(width: 8),
+              _SectionPill(label: 'Rooms', isActive: _section == 1, onTap: () => setState(() => _section = 1)),
+            ],
+          ),
+        ),
+        // Search
+        Padding(
+          padding: const EdgeInsets.all(16),
+          child: TextField(
+            onChanged: (v) => setState(() => _search = v.toLowerCase()),
+            decoration: AppTheme.inputDecoration(label: 'Search...', prefixIcon: Icons.search_rounded),
+            style: GoogleFonts.poppins(fontSize: 14),
+          ),
+        ),
+        Expanded(
+          child: _section == 0 ? _buildCourseList() : _buildRoomList(),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCourseList() {
+    final data = widget.repo.data!;
+    final filtered = data.courses.where((c) =>
+      c.code.toLowerCase().contains(_search) ||
+      c.title.toLowerCase().contains(_search)).toList();
+
+    return Stack(
+      children: [
+        ListView.builder(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 80),
+          itemCount: filtered.length,
+          itemBuilder: (ctx, i) {
+            final c = filtered[i];
+            return Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              decoration: AppTheme.cleanCardDecoration,
+              child: ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                leading: CircleAvatar(
+                  backgroundColor: AppTheme.warningAmber.withValues(alpha: 0.1),
+                  child: const Icon(Icons.menu_book_outlined, color: AppTheme.warningAmber, size: 20),
                 ),
-              ),
-              const SizedBox(height: 20),
-              
-              // Key Metrics Row
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: [
-                    _MetricCard(
-                      title: 'Total Classes',
-                      value: entries.length.toString(),
-                      icon: Icons.school,
-                      color: Colors.blue,
-                    ),
-                    const SizedBox(width: 12),
-                    _MetricCard(
-                      title: 'Online Classes',
-                      value: entries
-                          .where((e) => e.mode.toLowerCase() == 'online')
-                          .length
-                          .toString(),
-                      icon: Icons.videocam,
-                      color: Colors.green,
-                    ),
-                    const SizedBox(width: 12),
-                    _MetricCard(
-                      title: 'Onsite Classes',
-                      value: entries
-                          .where((e) => e.mode.toLowerCase() == 'onsite')
-                          .length
-                          .toString(),
-                      icon: Icons.location_on,
-                      color: Colors.orange,
-                    ),
-                    const SizedBox(width: 12),
-                    _MetricCard(
-                      title: 'Cancelled',
-                      value: entries
-                          .where((e) => e.isCancelled == true)
-                          .length
-                          .toString(),
-                      icon: Icons.cancel,
-                      color: Colors.red,
-                    ),
+                title: Text(c.title, style: AppTheme.bodyMedium),
+                subtitle: Text('Code: ${c.code}', style: AppTheme.caption),
+                trailing: PopupMenuButton<String>(
+                  onSelected: (v) {
+                    if (v == 'edit') _editCourse(c);
+                    if (v == 'delete') _confirmDeleteCourse(c);
+                  },
+                  itemBuilder: (_) => [
+                    const PopupMenuItem(value: 'edit', child: Text('Edit')),
+                    PopupMenuItem(value: 'delete', child: Text('Delete', style: TextStyle(color: AppTheme.errorRed))),
                   ],
                 ),
               ),
-              const SizedBox(height: 30),
-
-              // Classes by Batch
-              _buildClassesByBatch(entries),
-              const SizedBox(height: 30),
-
-              // Classes by Day
-              _buildClassesByDay(entries),
-              const SizedBox(height: 30),
-
-              // Classes by Type
-              _buildClassesByType(entries),
-              const SizedBox(height: 30),
-
-              // Classes by Mode
-              _buildClassesByMode(entries),
-            ],
+            );
+          },
+        ),
+        Positioned(
+          right: 16, bottom: 16,
+          child: FloatingActionButton(
+            heroTag: 'addCourse',
+            backgroundColor: AppTheme.primaryBlue,
+            foregroundColor: Colors.white,
+            onPressed: _addCourse,
+            child: const Icon(Icons.add),
           ),
-        );
+        ),
+      ],
+    );
+  }
+
+  Widget _buildRoomList() {
+    final data = widget.repo.data!;
+    final filtered = data.rooms.where((r) =>
+      r.name.toLowerCase().contains(_search) ||
+      r.id.toLowerCase().contains(_search)).toList();
+
+    return Stack(
+      children: [
+        ListView.builder(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 80),
+          itemCount: filtered.length,
+          itemBuilder: (ctx, i) {
+            final r = filtered[i];
+            return Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              decoration: AppTheme.cleanCardDecoration,
+              child: ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                leading: CircleAvatar(
+                  backgroundColor: AppTheme.infoCyan.withValues(alpha: 0.1),
+                  child: const Icon(Icons.meeting_room_outlined, color: AppTheme.infoCyan, size: 20),
+                ),
+                title: Text(r.name, style: AppTheme.bodyMedium),
+                subtitle: Text('ID: ${r.id}', style: AppTheme.caption),
+                trailing: PopupMenuButton<String>(
+                  onSelected: (v) {
+                    if (v == 'edit') _editRoom(r);
+                    if (v == 'delete') _confirmDeleteRoom(r);
+                  },
+                  itemBuilder: (_) => [
+                    const PopupMenuItem(value: 'edit', child: Text('Edit')),
+                    PopupMenuItem(value: 'delete', child: Text('Delete', style: TextStyle(color: AppTheme.errorRed))),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+        Positioned(
+          right: 16, bottom: 16,
+          child: FloatingActionButton(
+            heroTag: 'addRoom',
+            backgroundColor: AppTheme.primaryBlue,
+            foregroundColor: Colors.white,
+            onPressed: _addRoom,
+            child: const Icon(Icons.add),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ── COURSE CRUD ──
+
+  void _addCourse() {
+    final codeC = TextEditingController();
+    final titleC = TextEditingController();
+    _showFormDialog(
+      title: 'Add Course',
+      fields: [
+        _FormField('Course Code', codeC, Icons.code_outlined),
+        _FormField('Course Title', titleC, Icons.menu_book_outlined),
+      ],
+      onConfirm: () async {
+        final code = codeC.text.trim();
+        final title = titleC.text.trim();
+        await widget.svc.addCourse(Course(code: code, title: title));
+        // Notify all teachers who have notifications enabled
+        final teachers = widget.repo.data?.teachers ?? [];
+        for (final t in teachers) {
+          if (t.notificationsEnabled) {
+            await widget.svc.createNotification(AppNotification(
+              id: '',
+              type: 'general',
+              title: 'New Course Added',
+              body: 'Course "$title" ($code) has been added by Super Admin.',
+              recipientType: 'teacher',
+              recipientId: t.initial,
+              createdAt: '',
+            ));
+          }
+        }
+        widget.onRefresh();
       },
     );
   }
 
-  Widget _buildClassesByBatch(List<TimetableEntry> entries) {
-    final batchMap = <String, int>{};
-    
-    for (var entry in entries) {
-      if (entry.batchId.isNotEmpty) {
-        batchMap[entry.batchId] = (batchMap[entry.batchId] ?? 0) + 1;
-      }
-    }
-
-    final sortedBatches = batchMap.entries.toList()
-      ..sort((a, b) => b.value.compareTo(a.value));
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        border: Border.all(color: Colors.grey.shade300),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Classes by Batch',
-            style: GoogleFonts.poppins(
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 16),
-          if (sortedBatches.isEmpty)
-            const Text('No data available')
-          else
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: DataTable(
-                columns: [
-                  DataColumn(label: Text('Batch')),
-                  DataColumn(label: Text('Count')),
-                  DataColumn(label: Text('%')),
-                ],
-                rows: sortedBatches.map((entry) {
-                  final percentage = (entry.value / entries.length * 100).toStringAsFixed(1);
-                  return DataRow(cells: [
-                    DataCell(Text(entry.key)),
-                    DataCell(Text(entry.value.toString())),
-                    DataCell(Text('$percentage%')),
-                  ]);
-                }).toList(),
-              ),
-            ),
-        ],
-      ),
+  void _editCourse(Course c) {
+    final titleC = TextEditingController(text: c.title);
+    _showFormDialog(
+      title: 'Edit Course',
+      fields: [
+        _FormField('Course Title', titleC, Icons.menu_book_outlined),
+      ],
+      onConfirm: () async {
+        await widget.svc.updateCourse(c.code, Course(code: c.code, title: titleC.text.trim()));
+        widget.onRefresh();
+      },
     );
   }
 
-  Widget _buildClassesByDay(List<TimetableEntry> entries) {
-    final dayMap = <String, int>{};
-    final days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-    
-    for (var day in days) {
-      dayMap[day] = 0;
-    }
+  void _confirmDeleteCourse(Course c) {
+    _showDeleteDialog('Delete Course', 'Remove "${c.title}" (${c.code})?', () async {
+      await widget.svc.deleteCourse(c.code);
+      widget.onRefresh();
+    });
+  }
 
-    for (var entry in entries) {
-      if (dayMap.containsKey(entry.day)) {
-        dayMap[entry.day] = (dayMap[entry.day] ?? 0) + 1;
-      }
-    }
+  // ── ROOM CRUD ──
 
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        border: Border.all(color: Colors.grey.shade300),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Classes Distribution by Day',
-            style: GoogleFonts.poppins(
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 16),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: dayMap.entries.map((entry) {
-                return Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  child: Column(
-                    children: [
-                      Container(
-                        width: 40,
-                        height: 100,
-                        decoration: BoxDecoration(
-                          color: _getColorForCount(entry.value),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Center(
-                          child: Text(
-                            entry.value.toString(),
-                            style: GoogleFonts.poppins(
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        entry.key.substring(0, 3),
-                        style: GoogleFonts.poppins(fontSize: 12),
-                      ),
-                    ],
-                  ),
-                );
-              }).toList(),
-            ),
-          ),
-        ],
-      ),
+  void _addRoom() {
+    final idC = TextEditingController();
+    final nameC = TextEditingController();
+    _showFormDialog(
+      title: 'Add Room',
+      fields: [
+        _FormField('Room ID', idC, Icons.tag_outlined),
+        _FormField('Room Name', nameC, Icons.meeting_room_outlined),
+      ],
+      onConfirm: () async {
+        await widget.svc.addRoom(Room(id: idC.text.trim(), name: nameC.text.trim()));
+        widget.onRefresh();
+      },
     );
   }
 
-  Widget _buildClassesByType(List<TimetableEntry> entries) {
-    final typeMap = <String, int>{};
-    
-    for (var entry in entries) {
-      if (entry.type.isNotEmpty) {
-        typeMap[entry.type] = (typeMap[entry.type] ?? 0) + 1;
-      }
-    }
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        border: Border.all(color: Colors.grey.shade300),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Classes by Type',
-            style: GoogleFonts.poppins(
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 16),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: typeMap.entries.map((entry) {
-                final percentage = (entry.value / entries.length * 100).toStringAsFixed(1);
-                return Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  child: Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: _getTypeColor(entry.key),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Column(
-                      children: [
-                        Text(
-                          entry.key,
-                          style: GoogleFonts.poppins(
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          entry.value.toString(),
-                          style: GoogleFonts.poppins(
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          '$percentage%',
-                          style: GoogleFonts.poppins(
-                            fontSize: 12,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              }).toList(),
-            ),
-          ),
-        ],
-      ),
+  void _editRoom(Room r) {
+    final nameC = TextEditingController(text: r.name);
+    _showFormDialog(
+      title: 'Edit Room',
+      fields: [
+        _FormField('Room Name', nameC, Icons.meeting_room_outlined),
+      ],
+      onConfirm: () async {
+        await widget.svc.updateRoom(r.id, Room(id: r.id, name: nameC.text.trim()));
+        widget.onRefresh();
+      },
     );
   }
 
-  Widget _buildClassesByMode(List<TimetableEntry> entries) {
-    final modeStatus = <String, Map<String, int>>{};
-    
-    for (var entry in entries) {
-      if (!modeStatus.containsKey(entry.mode)) {
-        modeStatus[entry.mode] = {
-          'total': 0,
-          'cancelled': 0,
-        };
-      }
-      
-      modeStatus[entry.mode]!['total'] = (modeStatus[entry.mode]!['total'] ?? 0) + 1;
-      if (entry.isCancelled) {
-        modeStatus[entry.mode]!['cancelled'] = (modeStatus[entry.mode]!['cancelled'] ?? 0) + 1;
-      }
-    }
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        border: Border.all(color: Colors.grey.shade300),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Classes by Mode',
-            style: GoogleFonts.poppins(
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 16),
-          if (modeStatus.isEmpty)
-            const Text('No data available')
-          else
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: DataTable(
-                columns: [
-                  DataColumn(label: Text('Mode')),
-                  DataColumn(label: Text('Total')),
-                  DataColumn(label: Text('Active')),
-                  DataColumn(label: Text('Cancelled')),
-                ],
-                rows: modeStatus.entries.map((entry) {
-                  final total = entry.value['total'] ?? 0;
-                  final cancelled = entry.value['cancelled'] ?? 0;
-                  final active = total - cancelled;
-                  
-                  return DataRow(cells: [
-                    DataCell(Text(entry.key)),
-                    DataCell(Text(total.toString())),
-                    DataCell(
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: Colors.green.shade100,
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Text(active.toString()),
-                      ),
-                    ),
-                    DataCell(
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: Colors.red.shade100,
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Text(cancelled.toString()),
-                      ),
-                    ),
-                  ]);
-                }).toList(),
-              ),
-            ),
-        ],
-      ),
-    );
+  void _confirmDeleteRoom(Room r) {
+    _showDeleteDialog('Delete Room', 'Remove "${r.name}" (${r.id})?', () async {
+      await widget.svc.deleteRoom(r.id);
+      widget.onRefresh();
+    });
   }
 
-  Color _getColorForCount(int count) {
-    if (count == 0) return Colors.grey.shade300;
-    if (count < 5) return Colors.blue.shade300;
-    if (count < 10) return Colors.blue.shade500;
-    return Colors.blue.shade700;
-  }
+  // ── GENERIC DIALOGS ──
 
-  Color _getTypeColor(String type) {
-    switch (type.toLowerCase()) {
-      case 'lecture':
-        return Colors.purple;
-      case 'tutorial':
-        return Colors.teal;
-      case 'sessional':
-        return Colors.indigo;
-      default:
-        return Colors.grey;
-    }
-  }
-}
-
-// Metric Card Widget
-class _MetricCard extends StatelessWidget {
-  final String title;
-  final String value;
-  final IconData icon;
-  final Color color;
-
-  const _MetricCard({
-    required this.title,
-    required this.value,
-    required this.icon,
-    required this.color,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 180,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
-        border: Border.all(color: color.withOpacity(0.3)),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                title,
-                style: GoogleFonts.poppins(
-                  fontSize: 12,
-                  color: Colors.grey.shade600,
+  void _showFormDialog({
+    required String title,
+    required List<_FormField> fields,
+    required Future<void> Function() onConfirm,
+  }) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppTheme.radiusL)),
+        title: Text(title, style: AppTheme.heading3),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: fields.map((f) => Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: TextField(
+                  controller: f.ctrl,
+                  decoration: AppTheme.inputDecoration(label: f.label, prefixIcon: f.icon),
+                  style: GoogleFonts.poppins(fontSize: 14),
                 ),
-              ),
-              Icon(icon, color: color, size: 20),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Text(
-            value,
-            style: GoogleFonts.poppins(
-              fontSize: 28,
-              fontWeight: FontWeight.bold,
-              color: color,
+              )).toList(),
             ),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              await onConfirm();
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showDeleteDialog(String title, String msg, Future<void> Function() onDelete) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppTheme.radiusL)),
+        title: Text(title, style: AppTheme.heading3),
+        content: Text(msg, style: AppTheme.body),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.errorRed),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              await onDelete();
+            },
+            child: const Text('Delete'),
           ),
         ],
       ),

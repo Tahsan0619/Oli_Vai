@@ -3,17 +3,14 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../services/data_repository.dart';
 import '../services/supabase_service.dart';
-import '../widgets/custom_search_bar.dart';
-import '../widgets/department_dropdown.dart';
-import '../widgets/online_badge.dart';
+import '../models/teacher.dart';
+import '../utils/app_theme.dart';
 import '../widgets/schedule_card.dart';
-import '../widgets/animated_illustration.dart';
-import '../utils/date_utils.dart';
+import 'book_appointment_screen.dart';
+import 'monthly_routine_screen.dart';
 
-/// Teacher screen for searching by teacher initial
 class TeacherScreen extends StatefulWidget {
   final DataRepository repo;
-
   const TeacherScreen({super.key, required this.repo});
 
   @override
@@ -21,325 +18,415 @@ class TeacherScreen extends StatefulWidget {
 }
 
 class _TeacherScreenState extends State<TeacherScreen> {
-  final _searchController = TextEditingController();
-  String _selectedDepartment = 'EdTE';
-  List _scheduleEntries = [];
-  bool _hasSearched = false;
-  String? _errorMessage;
-  String? _teacherName;
-  dynamic _teacher;
+  final _searchCtrl = TextEditingController();
+  Teacher? _selectedTeacher;
+  String _selectedDay = _currentDay();
 
-  void _searchSchedule() {
-    final initial = _searchController.text.trim().toUpperCase();
-    if (initial.isEmpty) {
-      setState(() {
-        _errorMessage = 'Please enter teacher initial';
-        _hasSearched = false;
-      });
-      return;
-    }
+  static const _days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-    final day = todayAbbrev();
-    
-    // Try to find teacher
-    dynamic teacher;
-    for (var t in widget.repo.data!.teachers) {
-      if (t.initial.toUpperCase() == initial) {
-        teacher = t;
-        break;
-      }
-    }
-
-    if (teacher == null) {
-      setState(() {
-        _errorMessage = 'Teacher not found';
-        _hasSearched = true;
-        _scheduleEntries = [];
-        _teacherName = null;
-        _teacher = null;
-      });
-      return;
-    }
-
-    final entries = widget.repo.teacherEntriesForDay(teacher.id, day);
-    
-    setState(() {
-      _scheduleEntries = entries;
-      _hasSearched = true;
-      _teacherName = teacher.name;
-      _teacher = teacher;
-      _errorMessage = entries.isEmpty ? 'No classes today for ${teacher.name}' : null;
-    });
+  static String _currentDay() {
+    const dayMap = {1: 'Mon', 2: 'Tue', 3: 'Wed', 4: 'Thu', 5: 'Fri', 6: 'Sat', 7: 'Sun'};
+    return dayMap[DateTime.now().weekday] ?? 'Sun';
   }
 
-  void _showSettingsMenu(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: const Color(0xFF1E1E1E),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) => Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.logout, color: Colors.white),
-              title: Text('Logout', style: GoogleFonts.poppins(color: Colors.white)),
-              onTap: () async {
-                Navigator.pop(context);
-                await context.read<SupabaseService>().logout();
-                if (context.mounted) {
-                  Navigator.pushReplacementNamed(context, '/');
-                }
-              },
-            ),
-          ],
-        ),
-      ),
-    );
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final allTeachers = widget.repo.data?.teachers ?? [];
+    final q = _searchCtrl.text.trim().toLowerCase();
+    final filtered = q.isEmpty
+        ? allTeachers
+        : allTeachers.where((t) =>
+            t.initial.toLowerCase().contains(q) ||
+            t.name.toLowerCase().contains(q)).toList();
+
     return Scaffold(
-      backgroundColor: const Color(0xFF121212),
-      body: SafeArea(
-        child: Column(
-          children: [
-            // Top App Bar
-            Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF8A5BFF),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: const Icon(Icons.person, color: Colors.white, size: 28),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      'Teacher',
-                      style: GoogleFonts.poppins(
-                        fontSize: 24,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.white,
-                      ),
-                    ),
-                  ),
-                  const OnlineBadge(),
-                  const SizedBox(width: 12),
-                  IconButton(
-                    icon: const Icon(Icons.menu, color: Colors.white),
-                    onPressed: () => _showSettingsMenu(context),
-                  ),
-                ],
+      backgroundColor: AppTheme.scaffoldBg,
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 0,
+        scrolledUnderElevation: 0.5,
+        title: Text('Teacher Lookup', style: GoogleFonts.poppins(
+          fontSize: 18, fontWeight: FontWeight.w600, color: AppTheme.textPrimary,
+        )),
+        leading: _selectedTeacher != null
+            ? IconButton(
+                icon: const Icon(Icons.arrow_back_ios_new, size: 18),
+                onPressed: () => setState(() => _selectedTeacher = null),
+              )
+            : null,
+      ),
+      body: _selectedTeacher != null
+          ? _teacherDetail(_selectedTeacher!)
+          : _teacherSearch(filtered),
+    );
+  }
+
+  Widget _teacherSearch(List<Teacher> filtered) {
+    return Column(
+      children: [
+        // Search bar
+        Container(
+          color: Colors.white,
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+          child: TextField(
+            controller: _searchCtrl,
+            onChanged: (_) => setState(() {}),
+            style: GoogleFonts.poppins(fontSize: 14, color: AppTheme.textPrimary),
+            decoration: InputDecoration(
+              hintText: 'Search by teacher initial (e.g. SAF)',
+              hintStyle: GoogleFonts.poppins(fontSize: 14, color: AppTheme.textHint),
+              prefixIcon: const Icon(Icons.search, color: AppTheme.textHint, size: 20),
+              filled: true,
+              fillColor: AppTheme.inputFill,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(AppTheme.radiusM),
+                borderSide: BorderSide.none,
               ),
             ),
-            
-            // Search Section
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: CustomSearchBar(
-                      controller: _searchController,
-                      hintText: 'Enter Teacher Initial - NRC',
-                      onSubmitted: (_) => _searchSchedule(),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  DepartmentDropdown(
-                    value: _selectedDepartment,
-                    onChanged: (value) => setState(() => _selectedDepartment = value!),
-                  ),
-                ],
-              ),
-            ),
-            
-            const SizedBox(height: 24),
-            
-            // Teacher Profile Card
-            if (_teacherName != null && _teacher != null)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                child: Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF2A2A2A),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
+          ),
+        ),
+        Divider(height: 1, color: AppTheme.dividerColor),
+
+        // Teacher list
+        Expanded(
+          child: filtered.isEmpty
+              ? Center(
                   child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.center,
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      // Profile Picture
-                      if (_teacher!.profilePic != null && _teacher!.profilePic!.isNotEmpty)
-                        ClipOval(
-                          child: Image.network(
-                            _teacher!.profilePic!,
-                            width: 120,
-                            height: 120,
-                            fit: BoxFit.cover,
-                            errorBuilder: (context, error, stackTrace) {
-                              return Container(
-                                width: 120,
-                                height: 120,
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFF1E1E1E),
-                                  shape: BoxShape.circle,
-                                ),
-                                child: const Icon(Icons.person, size: 60, color: Colors.grey),
-                              );
-                            },
+                      Icon(Icons.person_search_outlined, size: 48, color: AppTheme.textHint),
+                      const SizedBox(height: 12),
+                      Text('No teachers found', style: AppTheme.subtitle),
+                    ],
+                  ),
+                )
+              : ListView.builder(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: filtered.length,
+                  itemBuilder: (_, i) => _teacherCard(filtered[i]),
+                ),
+        ),
+      ],
+    );
+  }
+
+  Widget _teacherCard(Teacher teacher) {
+    return GestureDetector(
+      onTap: () => setState(() => _selectedTeacher = teacher),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(AppTheme.radiusL),
+          border: Border.all(color: AppTheme.borderLight),
+          boxShadow: AppTheme.cardShadow,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                // Profile avatar
+                CircleAvatar(
+                  radius: 26,
+                  backgroundColor: AppTheme.primaryBlueLight,
+                  backgroundImage: teacher.profilePic != null
+                      ? NetworkImage(teacher.profilePic!)
+                      : null,
+                  child: teacher.profilePic == null
+                      ? Text(
+                          teacher.initial.substring(0, teacher.initial.length > 2 ? 2 : teacher.initial.length),
+                          style: GoogleFonts.poppins(
+                            fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.primaryBlue,
                           ),
                         )
-                      else
-                        Container(
-                          width: 120,
-                          height: 120,
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF1E1E1E),
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Icon(Icons.person, size: 60, color: Colors.grey),
-                        ),
-                      const SizedBox(height: 16),
-                      // Teacher Name
+                      : null,
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
                       Text(
-                        _teacherName!,
+                        teacher.name,
                         style: GoogleFonts.poppins(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.white,
+                          fontSize: 15, fontWeight: FontWeight.w600, color: AppTheme.textPrimary,
                         ),
-                        textAlign: TextAlign.center,
                       ),
-                      // Teacher Designation
-                      if (_teacher!.designation.isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 8.0),
-                          child: Text(
-                            _teacher!.designation,
-                            style: GoogleFonts.poppins(
-                              fontSize: 14,
-                              color: Colors.grey[400],
-                            ),
-                            textAlign: TextAlign.center,
-                          ),
-                        ),
-                      const SizedBox(height: 12),
-                      const Divider(color: Color(0xFF444444), thickness: 1),
-                      const SizedBox(height: 12),
-                      // Teacher Details
-                      Column(
-                        children: [
-                          // Phone
-                          if (_teacher!.phone.isNotEmpty)
-                            Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 6.0),
-                              child: Row(
-                                children: [
-                                  const Icon(Icons.phone, size: 18, color: Color(0xFF5B7CFF)),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: Text(
-                                      _teacher!.phone,
-                                      style: GoogleFonts.poppins(
-                                        fontSize: 13,
-                                        color: Colors.grey[300],
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          // Email
-                          if (_teacher!.email.isNotEmpty)
-                            Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 6.0),
-                              child: Row(
-                                children: [
-                                  const Icon(Icons.email, size: 18, color: Color(0xFF5B7CFF)),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: Text(
-                                      _teacher!.email,
-                                      style: GoogleFonts.poppins(
-                                        fontSize: 13,
-                                        color: Colors.grey[300],
-                                      ),
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          // Department
-                          if (_teacher!.homeDepartment.isNotEmpty)
-                            Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 6.0),
-                              child: Row(
-                                children: [
-                                  const Icon(Icons.domain, size: 18, color: Color(0xFF5B7CFF)),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: Text(
-                                      _teacher!.homeDepartment,
-                                      style: GoogleFonts.poppins(
-                                        fontSize: 13,
-                                        color: Colors.grey[300],
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                        ],
+                      Text(
+                        teacher.designation,
+                        style: GoogleFonts.poppins(fontSize: 12, color: AppTheme.textSecondary),
+                      ),
+                      Text(
+                        teacher.homeDepartment,
+                        style: GoogleFonts.poppins(fontSize: 11, color: AppTheme.textHint),
                       ),
                     ],
                   ),
                 ),
+                AppTheme.chip(teacher.initial, bg: AppTheme.primaryBlueLight, fg: AppTheme.primaryBlue),
+              ],
+            ),
+
+            const SizedBox(height: 12),
+            Divider(height: 1, color: AppTheme.dividerColor),
+            const SizedBox(height: 12),
+
+            // Contact info
+            if (teacher.email.isNotEmpty)
+              _infoRow(Icons.email_outlined, teacher.email),
+            if (teacher.phone.isNotEmpty)
+              _infoRow(Icons.phone_outlined, teacher.phone),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _teacherDetail(Teacher teacher) {
+    final entries = widget.repo.teacherEntriesForDay(teacher.initial, _selectedDay);
+
+    return ListView(
+      padding: EdgeInsets.zero,
+      children: [
+        // Teacher header card
+        Container(
+          color: Colors.white,
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  CircleAvatar(
+                    radius: 32,
+                    backgroundColor: AppTheme.primaryBlueLight,
+                    backgroundImage: teacher.profilePic != null
+                        ? NetworkImage(teacher.profilePic!)
+                        : null,
+                    child: teacher.profilePic == null
+                        ? Text(
+                            teacher.initial.substring(0, teacher.initial.length > 2 ? 2 : teacher.initial.length),
+                            style: GoogleFonts.poppins(
+                              fontSize: 18, fontWeight: FontWeight.w600, color: AppTheme.primaryBlue,
+                            ),
+                          )
+                        : null,
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(teacher.name, style: GoogleFonts.poppins(
+                          fontSize: 18, fontWeight: FontWeight.w600, color: AppTheme.textPrimary,
+                        )),
+                        Text(teacher.designation, style: GoogleFonts.poppins(
+                          fontSize: 13, color: AppTheme.textSecondary,
+                        )),
+                        Text(teacher.homeDepartment, style: GoogleFonts.poppins(
+                          fontSize: 12, color: AppTheme.textHint,
+                        )),
+                      ],
+                    ),
+                  ),
+                  AppTheme.chip(teacher.initial, bg: AppTheme.primaryBlueLight, fg: AppTheme.primaryBlue),
+                ],
               ),
-            
-            const SizedBox(height: 16),
-            
-            // Content
-            Expanded(
-              child: _hasSearched
-                  ? _scheduleEntries.isEmpty
-                      ? Center(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(Icons.event_busy, size: 80, color: Colors.grey[700]),
-                              const SizedBox(height: 16),
-                              Text(
-                                _errorMessage ?? 'No schedule found',
-                                style: GoogleFonts.poppins(
-                                  fontSize: 16,
-                                  color: Colors.grey[600],
-                                ),
-                                textAlign: TextAlign.center,
-                              ),
-                            ],
-                          ),
-                        )
-                      : ListView.builder(
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                          itemCount: _scheduleEntries.length,
-                          itemBuilder: (context, index) {
-                            final entry = _scheduleEntries[index];
-                            return ScheduleCard(entry: entry, repo: widget.repo);
-                          },
-                        )
-                  : _buildEmptyState(),
+              const SizedBox(height: 16),
+              // Contact pills
+              Row(
+                children: [
+                  if (teacher.email.isNotEmpty)
+                    Expanded(
+                      child: _contactPill(Icons.email_outlined, teacher.email),
+                    ),
+                  if (teacher.email.isNotEmpty && teacher.phone.isNotEmpty)
+                    const SizedBox(width: 8),
+                  if (teacher.phone.isNotEmpty)
+                    Expanded(
+                      child: _contactPill(Icons.phone_outlined, teacher.phone),
+                    ),
+                ],
+              ),
+            ],
+          ),
+        ),
+
+        Divider(height: 1, color: AppTheme.dividerColor),
+
+        // Action buttons: Monthly Routine + Book Appointment
+        Container(
+          color: Colors.white,
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+          child: Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => MonthlyRoutineScreen(
+                        repo: widget.repo,
+                        title: '${teacher.initial} — Monthly Routine',
+                        teacherInitial: teacher.initial,
+                        showTeacher: false,
+                        showBatch: true,
+                      ),
+                    ),
+                  ),
+                  icon: const Icon(Icons.calendar_month, size: 16),
+                  label: const Text('Monthly Routine'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppTheme.primaryBlue,
+                    side: BorderSide(color: AppTheme.primaryBlue.withValues(alpha: 0.4)),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppTheme.radiusS)),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => ChangeNotifierProvider.value(
+                        value: context.read<SupabaseService>(),
+                        child: BookAppointmentScreen(teacher: teacher),
+                      ),
+                    ),
+                  ),
+                  icon: const Icon(Icons.event_available, size: 16),
+                  label: const Text('Appointment'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primaryBlue,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppTheme.radiusS)),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        Divider(height: 1, color: AppTheme.dividerColor),
+
+        // Day selector
+        Container(
+          color: Colors.white,
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          child: SizedBox(
+            height: 64,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              itemCount: _days.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 8),
+              itemBuilder: (_, i) => _dayPill(_days[i]),
+            ),
+          ),
+        ),
+
+        // Header
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+          child: Row(
+            children: [
+              Text("Today's Schedule", style: GoogleFonts.poppins(
+                fontSize: 16, fontWeight: FontWeight.w600, color: AppTheme.textPrimary,
+              )),
+              const Spacer(),
+              if (entries.isNotEmpty)
+                Text('${entries.length} Sessions', style: GoogleFonts.poppins(
+                  fontSize: 13, color: AppTheme.textSecondary,
+                )),
+            ],
+          ),
+        ),
+
+        // Schedule cards
+        if (entries.isEmpty)
+          Padding(
+            padding: const EdgeInsets.all(32),
+            child: Center(
+              child: Column(
+                children: [
+                  Icon(Icons.free_breakfast_outlined, size: 40, color: AppTheme.textHint),
+                  const SizedBox(height: 8),
+                  Text('No classes on $_selectedDay', style: AppTheme.subtitle),
+                ],
+              ),
+            ),
+          )
+        else
+          ...entries.map((e) => Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: ScheduleCard(
+              entry: e,
+              repo: widget.repo,
+              showTeacher: false,
+              showBatch: true,
+            ),
+          )),
+
+        // Footer note
+        Padding(
+          padding: const EdgeInsets.all(16),
+          child: Text(
+            '* Schedule updates automatically every 15 minutes',
+            style: GoogleFonts.poppins(
+              fontSize: 11, fontStyle: FontStyle.italic, color: AppTheme.textHint,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _dayPill(String day) {
+    final isSelected = _selectedDay == day;
+    final now = DateTime.now();
+    final dayIndex = _days.indexOf(day);
+    final currentDayIndex = _days.indexOf(_currentDay());
+    final diff = dayIndex - currentDayIndex;
+    final date = now.add(Duration(days: diff));
+
+    return GestureDetector(
+      onTap: () => setState(() => _selectedDay = day),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        width: 52,
+        decoration: BoxDecoration(
+          color: isSelected ? AppTheme.primaryBlue : Colors.transparent,
+          borderRadius: BorderRadius.circular(AppTheme.radiusM),
+          border: isSelected ? null : Border.all(color: AppTheme.borderLight),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              day.toUpperCase(),
+              style: GoogleFonts.poppins(
+                fontSize: 11, fontWeight: FontWeight.w600,
+                color: isSelected ? Colors.white.withValues(alpha: 0.8) : AppTheme.textHint,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              '${date.day}',
+              style: GoogleFonts.poppins(
+                fontSize: 18, fontWeight: FontWeight.w700,
+                color: isSelected ? Colors.white : AppTheme.textPrimary,
+              ),
             ),
           ],
         ),
@@ -347,27 +434,22 @@ class _TeacherScreenState extends State<TeacherScreen> {
     );
   }
 
-  Widget _buildEmptyState() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
+  Widget _contactPill(IconData icon, String text) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: AppTheme.inputFill,
+        borderRadius: BorderRadius.circular(AppTheme.radiusS),
+      ),
+      child: Row(
         children: [
-          const AnimatedIllustration(
-            icon: Icons.person,
-            primaryColor: Color(0xFF8A5BFF),
-            secondaryColor: Color(0xFFFF6B9D),
-            size: 250,
-          ),
-          const SizedBox(height: 24),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 32.0),
+          Icon(icon, size: 14, color: AppTheme.textHint),
+          const SizedBox(width: 6),
+          Expanded(
             child: Text(
-              "Search for a teacher's initial to view their schedule",
-              style: GoogleFonts.poppins(
-                fontSize: 16,
-                color: Colors.grey[600],
-              ),
-              textAlign: TextAlign.center,
+              text,
+              style: GoogleFonts.poppins(fontSize: 11, color: AppTheme.textSecondary),
+              overflow: TextOverflow.ellipsis,
             ),
           ),
         ],
@@ -375,9 +457,20 @@ class _TeacherScreenState extends State<TeacherScreen> {
     );
   }
 
-  @override
-  void dispose() {
-    _searchController.dispose();
-    super.dispose();
+  Widget _infoRow(IconData icon, String text) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(
+        children: [
+          Icon(icon, size: 15, color: AppTheme.textHint),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(text, style: GoogleFonts.poppins(
+              fontSize: 13, color: AppTheme.textSecondary,
+            )),
+          ),
+        ],
+      ),
+    );
   }
 }

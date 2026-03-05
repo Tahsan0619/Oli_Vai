@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../models/app_data.dart';
 import '../models/app_meta.dart';
+import '../models/notification_model.dart';
 import '../models/teacher.dart';
 import '../models/batch.dart';
 import '../models/course.dart';
@@ -239,6 +240,16 @@ class DataRepository extends ChangeNotifier {
   /// Add new timetable entry (super admin only)
   Future<void> addTimetableEntry(TimetableEntry entry) async {
     await _supabaseService.addTimetableEntry(entry);
+    // Send notification to the assigned teacher
+    await _supabaseService.createNotification(AppNotification(
+      id: '',
+      type: 'general',
+      title: 'New Class Assigned',
+      body: 'You have been assigned ${entry.courseCode} on ${entry.day} (${entry.start}-${entry.end}) for batch ${entry.batchId}.',
+      recipientType: 'teacher',
+      recipientId: entry.teacherInitial,
+      createdAt: '',
+    ));
     await load(); // Reload data
   }
 
@@ -248,6 +259,28 @@ class DataRepository extends ChangeNotifier {
     final entryId = _entryIdMap[key];
     if (entryId != null) {
       await _supabaseService.updateTimetableEntry(entryId, updated);
+      // Notify the teacher about the update
+      await _supabaseService.createNotification(AppNotification(
+        id: '',
+        type: 'general',
+        title: 'Class Schedule Updated',
+        body: '${updated.courseCode} on ${updated.day} (${updated.start}-${updated.end}) for batch ${updated.batchId} has been updated.',
+        recipientType: 'teacher',
+        recipientId: updated.teacherInitial,
+        createdAt: '',
+      ));
+      // If the teacher changed, also notify the old teacher
+      if (original.teacherInitial != updated.teacherInitial) {
+        await _supabaseService.createNotification(AppNotification(
+          id: '',
+          type: 'general',
+          title: 'Class Removed',
+          body: '${original.courseCode} on ${original.day} (${original.start}-${original.end}) has been reassigned from you.',
+          recipientType: 'teacher',
+          recipientId: original.teacherInitial,
+          createdAt: '',
+        ));
+      }
       await load(); // Reload data
     }
   }

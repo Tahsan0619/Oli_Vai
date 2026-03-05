@@ -1,755 +1,431 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:provider/provider.dart';
 import 'package:image_picker/image_picker.dart';
-import 'dart:io';
-import '../services/supabase_service.dart';
+import 'package:provider/provider.dart';
 import '../models/teacher.dart';
+import '../services/supabase_service.dart';
+import '../utils/app_theme.dart';
 
-/// Screen for teachers to manage their profile including profile picture
 class TeacherProfileScreen extends StatefulWidget {
   final String teacherInitial;
-
-  const TeacherProfileScreen({
-    super.key,
-    required this.teacherInitial,
-  });
+  const TeacherProfileScreen({super.key, required this.teacherInitial});
 
   @override
   State<TeacherProfileScreen> createState() => _TeacherProfileScreenState();
 }
 
 class _TeacherProfileScreenState extends State<TeacherProfileScreen> {
-  Teacher? _currentTeacher;
-  bool _isLoading = false;
-  File? _selectedImage;
+  Teacher? _teacher;
+  bool _isLoading = true;
   bool _isEditing = false;
-  bool _isChangingPassword = false;
+  bool _changingPassword = false;
 
-  final _nameController = TextEditingController();
-  final _initialController = TextEditingController();
-  final _phoneController = TextEditingController();
-  final _designationController = TextEditingController();
-  final _departmentController = TextEditingController();
-  final _currentPasswordController = TextEditingController();
-  final _newPasswordController = TextEditingController();
-  final _confirmPasswordController = TextEditingController();
+  late TextEditingController _nameCtrl;
+  late TextEditingController _designationCtrl;
+  late TextEditingController _phoneCtrl;
+  late TextEditingController _emailCtrl;
+  late TextEditingController _deptCtrl;
+  final _currentPwCtrl = TextEditingController();
+  final _newPwCtrl = TextEditingController();
+  bool _obscureCurrent = true;
+  bool _obscureNew = true;
 
   @override
   void initState() {
     super.initState();
+    _nameCtrl = TextEditingController();
+    _designationCtrl = TextEditingController();
+    _phoneCtrl = TextEditingController();
+    _emailCtrl = TextEditingController();
+    _deptCtrl = TextEditingController();
     _loadTeacher();
   }
 
   @override
   void dispose() {
-    _nameController.dispose();
-    _initialController.dispose();
-    _phoneController.dispose();
-    _designationController.dispose();
-    _departmentController.dispose();
-    _currentPasswordController.dispose();
-    _newPasswordController.dispose();
-    _confirmPasswordController.dispose();
+    _nameCtrl.dispose();
+    _designationCtrl.dispose();
+    _phoneCtrl.dispose();
+    _emailCtrl.dispose();
+    _deptCtrl.dispose();
+    _currentPwCtrl.dispose();
+    _newPwCtrl.dispose();
     super.dispose();
   }
 
   Future<void> _loadTeacher() async {
-    final service = context.read<SupabaseService>();
-    setState(() => _isLoading = true);
-
-    try {
-      final teachers = await service.getTeachers(forceRefresh: true);
-      final teacher = teachers.firstWhere(
-        (t) => t.initial == widget.teacherInitial,
-        orElse: () => throw Exception('Teacher not found'),
-      );
-
+    final svc = context.read<SupabaseService>();
+    final t = await svc.getTeacherByInitial(widget.teacherInitial);
+    if (mounted) {
       setState(() {
-        _currentTeacher = teacher;
-        _nameController.text = teacher.name;
-        _initialController.text = teacher.initial;
-        _phoneController.text = teacher.phone;
-        _designationController.text = teacher.designation;
-        _departmentController.text = teacher.homeDepartment;
+        _teacher = t;
+        _isLoading = false;
+        if (t != null) {
+          _nameCtrl.text = t.name;
+          _designationCtrl.text = t.designation;
+          _phoneCtrl.text = t.phone;
+          _emailCtrl.text = t.email;
+          _deptCtrl.text = t.homeDepartment;
+        }
       });
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error loading teacher: $e')),
-        );
-      }
-    } finally {
-      setState(() => _isLoading = false);
     }
   }
 
-  void _resetEditFields() {
-    if (_currentTeacher == null) return;
-    _nameController.text = _currentTeacher!.name;
-    _initialController.text = _currentTeacher!.initial;
-    _phoneController.text = _currentTeacher!.phone;
-    _designationController.text = _currentTeacher!.designation;
-    _departmentController.text = _currentTeacher!.homeDepartment;
-  }
-
-  Future<void> _saveProfileEdits() async {
-    if (_currentTeacher == null) return;
-
-    final name = _nameController.text.trim();
-    final initial = _initialController.text.trim();
-    final phone = _phoneController.text.trim();
-    final designation = _designationController.text.trim();
-    final department = _departmentController.text.trim();
-
-    if (name.isEmpty || initial.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Name and Initial are required.')),
-      );
-      return;
-    }
-
-    setState(() => _isLoading = true);
-
-    try {
-      final service = context.read<SupabaseService>();
-      final updated = Teacher(
-        id: _currentTeacher!.id,
-        name: name,
-        initial: initial,
-        designation: designation,
-        phone: phone,
-        email: _currentTeacher!.email,
-        homeDepartment: department,
-        profilePic: _currentTeacher!.profilePic,
-      );
-
-      final success = await service.updateTeacher(_currentTeacher!.id, updated);
-      if (success && context.mounted) {
-        await _loadTeacher();
-        setState(() => _isEditing = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Profile updated successfully!')),
-        );
-      }
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error updating profile: $e')),
-        );
-      }
-    } finally {
-      setState(() => _isLoading = false);
+  Future<void> _saveProfile() async {
+    if (_teacher == null) return;
+    final svc = context.read<SupabaseService>();
+    final updated = Teacher(
+      id: _teacher!.id,
+      name: _nameCtrl.text.trim(),
+      initial: _teacher!.initial,
+      designation: _designationCtrl.text.trim(),
+      phone: _phoneCtrl.text.trim(),
+      email: _emailCtrl.text.trim(),
+      homeDepartment: _deptCtrl.text.trim(),
+      profilePic: _teacher!.profilePic,
+      password: _teacher!.password,
+      hasChangedPassword: _teacher!.hasChangedPassword,
+    );
+    final ok = await svc.updateTeacher(_teacher!.id, updated);
+    if (!mounted) return;
+    if (ok) {
+      _showSnackBar('Profile updated');
+      setState(() {
+        _isEditing = false;
+        _teacher = updated;
+      });
+    } else {
+      _showSnackBar('Failed to update', isError: true);
     }
   }
 
   Future<void> _pickImage() async {
-    try {
-      final ImagePicker picker = ImagePicker();
-      final XFile? image = await picker.pickImage(
-        source: ImageSource.gallery,
-        maxWidth: 1024,
-        maxHeight: 1024,
-        imageQuality: 85,
-      );
-
-      if (image != null) {
-        setState(() => _selectedImage = File(image.path));
-      }
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error picking image: $e')),
-        );
-      }
-    }
-  }
-
-  Future<void> _uploadProfilePic() async {
-    if (_currentTeacher == null || _selectedImage == null) return;
-
-    setState(() => _isLoading = true);
-
-    try {
-      final service = context.read<SupabaseService>();
-
-      // Delete old profile pic if exists
-      if (_currentTeacher!.profilePic != null && _currentTeacher!.profilePic!.isNotEmpty) {
-        await service.deleteTeacherProfilePic(_currentTeacher!.profilePic!);
-      }
-
-      // Upload new image
-      final publicUrl = await service.uploadTeacherProfilePic(
-        _currentTeacher!.initial,
-        _selectedImage!.path,
-      );
-
-      // Update database
-      final success = await service.updateTeacherProfilePic(
-        _currentTeacher!.initial,
-        publicUrl,
-      );
-
-      if (success && context.mounted) {
-        // Reload teacher data
-        await _loadTeacher();
-        setState(() => _selectedImage = null);
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Profile picture updated successfully!')),
-        );
-      }
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error uploading image: $e')),
-        );
-      }
-    } finally {
-      setState(() => _isLoading = false);
-    }
-  }
-
-  Future<void> _removeProfilePic() async {
-    if (_currentTeacher == null || _currentTeacher!.profilePic == null) return;
-
-    // Show confirmation dialog
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Remove Profile Picture'),
-        content: const Text('Are you sure you want to remove your profile picture?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text('Remove'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirm != true || !context.mounted) return;
-
-    setState(() => _isLoading = true);
-
-    try {
-      final service = context.read<SupabaseService>();
-
-      // Delete from storage
-      await service.deleteTeacherProfilePic(_currentTeacher!.profilePic!);
-
-      // Update database to null
-      final success = await service.updateTeacherProfilePic(
-        _currentTeacher!.initial,
-        null,
-      );
-
-      if (success && context.mounted) {
-        await _loadTeacher();
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Profile picture removed successfully!')),
-        );
-      }
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error removing image: $e')),
-        );
-      }
-    } finally {
-      setState(() => _isLoading = false);
+    final picker = ImagePicker();
+    final picked = await picker.pickImage(source: ImageSource.gallery, maxWidth: 512);
+    if (picked == null || _teacher == null) return;
+    final svc = context.read<SupabaseService>();
+    final url = await svc.uploadTeacherProfilePic(_teacher!.initial, picked.path);
+    if (url != null) {
+      await svc.updateTeacherProfilePic(_teacher!.id, url);
+      await _loadTeacher();
     }
   }
 
   Future<void> _changePassword() async {
-    final currentPassword = _currentPasswordController.text.trim();
-    final newPassword = _newPasswordController.text.trim();
-    final confirmPassword = _confirmPasswordController.text.trim();
-
-    if (currentPassword.isEmpty || newPassword.isEmpty || confirmPassword.isEmpty) {
-      _showMessage('Please fill all fields', isError: true);
+    if (_newPwCtrl.text.length < 6) {
+      _showSnackBar('Password must be at least 6 characters', isError: true);
       return;
     }
-
-    if (newPassword != confirmPassword) {
-      _showMessage('New passwords do not match', isError: true);
-      return;
-    }
-
-    if (newPassword.length < 6) {
-      _showMessage('Password must be at least 6 characters', isError: true);
-      return;
-    }
-
-    setState(() => _isLoading = true);
-
-    final service = context.read<SupabaseService>();
-    
-    if (_currentTeacher == null) {
-      _showMessage('Teacher data not loaded', isError: true);
-      setState(() => _isLoading = false);
-      return;
-    }
-
+    final svc = context.read<SupabaseService>();
     // Verify current password
-    final verifiedTeacher = await service.authenticateTeacherByEmail(
-      _currentTeacher!.email,
-      currentPassword,
-    );
-    
-    if (verifiedTeacher == null) {
-      _showMessage('Current password is incorrect', isError: true);
-      setState(() => _isLoading = false);
-      return;
+    if (_teacher?.email != null && _teacher!.email.isNotEmpty) {
+      final verified = await svc.authenticateTeacherByEmail(_teacher!.email, _currentPwCtrl.text);
+      if (verified == null) {
+        if (mounted) _showSnackBar('Current password is incorrect', isError: true);
+        return;
+      }
     }
-
-    // Update password in database
-    try {
-      await service.updateTeacherPassword(_currentTeacher!.id, newPassword);
-      
-      _showMessage('Password updated successfully');
-      _currentPasswordController.clear();
-      _newPasswordController.clear();
-      _confirmPasswordController.clear();
-      setState(() => _isChangingPassword = false);
-    } catch (e) {
-      _showMessage('Failed to update password: $e', isError: true);
+    final ok = await svc.updateTeacherPassword(_teacher!.id, _newPwCtrl.text);
+    if (!mounted) return;
+    if (ok) {
+      _showSnackBar('Password updated');
+      setState(() => _changingPassword = false);
+      _currentPwCtrl.clear();
+      _newPwCtrl.clear();
+    } else {
+      _showSnackBar('Failed to update password', isError: true);
     }
-
-    setState(() => _isLoading = false);
   }
 
-  void _showMessage(String message, {bool isError = false}) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: isError ? Colors.red : Colors.green,
-      ),
-    );
+  void _showSnackBar(String msg, {bool isError = false}) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg),
+      backgroundColor: isError ? AppTheme.errorRed : AppTheme.successGreen,
+    ));
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoading) {
+      return Scaffold(
+        backgroundColor: AppTheme.scaffoldBg,
+        appBar: AppBar(backgroundColor: Colors.white, elevation: 0),
+        body: const Center(child: CircularProgressIndicator(color: AppTheme.primaryBlue)),
+      );
+    }
+    if (_teacher == null) {
+      return Scaffold(
+        backgroundColor: AppTheme.scaffoldBg,
+        appBar: AppBar(backgroundColor: Colors.white, elevation: 0),
+        body: Center(child: Text('Teacher not found', style: AppTheme.subtitle)),
+      );
+    }
+
     return Scaffold(
-      backgroundColor: const Color(0xFF121212),
+      backgroundColor: AppTheme.scaffoldBg,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF1E1E1E),
+        backgroundColor: Colors.white,
         elevation: 0,
-        title: Text(
-          'My Profile',
-          style: GoogleFonts.poppins(
-            fontSize: 24,
-            fontWeight: FontWeight.bold,
-            color: Colors.white,
-          ),
+        scrolledUnderElevation: 0.5,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_new, size: 18),
+          onPressed: () => Navigator.pop(context),
         ),
-        centerTitle: true,
-        iconTheme: const IconThemeData(color: Colors.white),
+        title: Text('Teacher Profile', style: GoogleFonts.poppins(
+          fontSize: 18, fontWeight: FontWeight.w600, color: AppTheme.textPrimary,
+        )),
         actions: [
-          if (_currentTeacher != null)
-            if (!_isEditing)
-              IconButton(
-                onPressed: () {
-                  setState(() => _isEditing = true);
-                },
-                icon: const Icon(Icons.edit),
-                tooltip: 'Edit Profile',
-              )
-            else ...[
-              IconButton(
-                onPressed: _saveProfileEdits,
-                icon: const Icon(Icons.save),
-                tooltip: 'Save',
-              ),
-              IconButton(
-                onPressed: () {
-                  _resetEditFields();
-                  setState(() => _isEditing = false);
-                },
-                icon: const Icon(Icons.close),
-                tooltip: 'Cancel',
-              ),
-            ],
+          if (!_isEditing)
+            TextButton.icon(
+              onPressed: () => setState(() => _isEditing = true),
+              icon: const Icon(Icons.edit_outlined, size: 16),
+              label: Text('Edit', style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w500)),
+            )
+          else
+            TextButton.icon(
+              onPressed: _saveProfile,
+              icon: const Icon(Icons.save_outlined, size: 16, color: AppTheme.primaryBlue),
+              label: Text('Save', style: GoogleFonts.poppins(
+                fontSize: 13, fontWeight: FontWeight.w600, color: AppTheme.primaryBlue,
+              )),
+            ),
+          const SizedBox(width: 8),
         ],
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : _currentTeacher == null
-              ? const Center(child: Text('Teacher not found'))
-              : SingleChildScrollView(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24.0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        // Profile Picture Section
-                        Center(
-                          child: Column(
-                            children: [
-                              // Current or Selected Image
-                              Container(
-                                width: 150,
-                                height: 150,
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  color: const Color(0xFF2A2A2A),
-                                  border: Border.all(
-                                    color: Theme.of(context).colorScheme.primary,
-                                    width: 3,
-                                  ),
-                                ),
-                                child: ClipOval(
-                                  child: _selectedImage != null
-                                      ? Image.file(
-                                          _selectedImage!,
-                                          fit: BoxFit.cover,
-                                        )
-                                      : _currentTeacher!.profilePic != null &&
-                                              _currentTeacher!.profilePic!.isNotEmpty
-                                          ? Image.network(
-                                              _currentTeacher!.profilePic!,
-                                              fit: BoxFit.cover,
-                                              errorBuilder: (context, error, stackTrace) {
-                                                return _buildInitialAvatar();
-                                              },
-                                            )
-                                          : _buildInitialAvatar(),
-                                ),
-                              ),
-                              const SizedBox(height: 16),
-                              
-                              // Action buttons
-                              Wrap(
-                                spacing: 8,
-                                alignment: WrapAlignment.center,
-                                children: [
-                                  ElevatedButton.icon(
-                                    onPressed: _pickImage,
-                                    icon: const Icon(Icons.add_photo_alternate),
-                                    label: const Text('Choose Photo'),
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: Theme.of(context).colorScheme.primary,
-                                    ),
-                                  ),
-                                  if (_selectedImage != null)
-                                    ElevatedButton.icon(
-                                      onPressed: _uploadProfilePic,
-                                      icon: const Icon(Icons.upload),
-                                      label: const Text('Upload'),
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: Colors.green,
-                                      ),
-                                    ),
-                                  if (_currentTeacher!.profilePic != null &&
-                                      _currentTeacher!.profilePic!.isNotEmpty)
-                                    ElevatedButton.icon(
-                                      onPressed: _removeProfilePic,
-                                      icon: const Icon(Icons.delete),
-                                      label: const Text('Remove'),
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: Colors.red,
-                                      ),
-                                    ),
-                                ],
-                              ),
-                              const SizedBox(height: 8),
-                              
-                              // Help text
-                              Text(
-                                'Select an image from your device gallery.\nThe image will be uploaded to secure cloud storage.',
-                                textAlign: TextAlign.center,
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          // Profile header
+          Container(
+            padding: const EdgeInsets.all(24),
+            decoration: AppTheme.cleanCardDecoration,
+            child: Column(
+              children: [
+                GestureDetector(
+                  onTap: _isEditing ? _pickImage : null,
+                  child: Stack(
+                    children: [
+                      CircleAvatar(
+                        radius: 46,
+                        backgroundColor: AppTheme.primaryBlueLight,
+                        backgroundImage: _teacher!.profilePic != null
+                            ? NetworkImage(_teacher!.profilePic!)
+                            : null,
+                        child: _teacher!.profilePic == null
+                            ? Text(
+                                _teacher!.initial.substring(0, _teacher!.initial.length > 2 ? 2 : _teacher!.initial.length),
                                 style: GoogleFonts.poppins(
-                                  fontSize: 12,
-                                  color: Colors.grey[400],
+                                  fontSize: 24, fontWeight: FontWeight.w600, color: AppTheme.primaryBlue,
                                 ),
-                              ),
-                            ],
+                              )
+                            : null,
+                      ),
+                      if (_isEditing)
+                        Positioned(
+                          bottom: 0, right: 0,
+                          child: Container(
+                            width: 28, height: 28,
+                            decoration: BoxDecoration(
+                              color: AppTheme.primaryBlue,
+                              shape: BoxShape.circle,
+                              border: Border.all(color: Colors.white, width: 2),
+                            ),
+                            child: const Icon(Icons.camera_alt, color: Colors.white, size: 14),
                           ),
                         ),
-                        const SizedBox(height: 32),
-                        
-                        // Teacher Information Card
-                        Card(
-                          color: const Color(0xFF1E1E1E),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
-                            side: BorderSide(
-                              color: Theme.of(context).colorScheme.primary.withOpacity(0.3),
-                            ),
-                          ),
-                          child: Padding(
-                            padding: const EdgeInsets.all(20.0),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Text(
-                                      'Teacher Information',
-                                      style: GoogleFonts.poppins(
-                                        fontSize: 20,
-                                        fontWeight: FontWeight.bold,
-                                        color: Colors.white,
-                                      ),
-                                    ),
-                                    if (_isEditing)
-                                      Text(
-                                        'Editing',
-                                        style: GoogleFonts.poppins(
-                                          fontSize: 12,
-                                          color: Colors.orangeAccent,
-                                        ),
-                                      ),
-                                  ],
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  _isEditing
-                                      ? 'Update your details and save'
-                                      : 'Read-only information managed by administration',
-                                  style: GoogleFonts.poppins(
-                                    fontSize: 12,
-                                    color: Colors.grey[400],
-                                  ),
-                                ),
-                                const Divider(height: 32, color: Colors.grey),
-                                _isEditing
-                                    ? _buildEditableField('Name', _nameController)
-                                    : _buildInfoRow('Name', _currentTeacher!.name),
-                                _isEditing
-                                    ? _buildEditableField('Initial', _initialController)
-                                    : _buildInfoRow('Initial', _currentTeacher!.initial),
-                                _buildInfoRow('Email', _currentTeacher!.email),
-                                _isEditing
-                                    ? _buildEditableField('Phone', _phoneController)
-                                    : _buildInfoRow('Phone', _currentTeacher!.phone),
-                                _isEditing
-                                    ? _buildEditableField('Designation', _designationController)
-                                    : _buildInfoRow('Designation', _currentTeacher!.designation),
-                                _isEditing
-                                    ? _buildEditableField('Department', _departmentController)
-                                    : _buildInfoRow('Department', _currentTeacher!.homeDepartment),
-                              ],
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 24),
-
-                        // Change Password Section
-                        Card(
-                          color: const Color(0xFF1E1E1E),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
-                            side: BorderSide(
-                              color: Theme.of(context).colorScheme.primary.withOpacity(0.3),
-                            ),
-                          ),
-                          child: Padding(
-                            padding: const EdgeInsets.all(20.0),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Text(
-                                      'Security',
-                                      style: GoogleFonts.poppins(
-                                        fontSize: 20,
-                                        fontWeight: FontWeight.bold,
-                                        color: Colors.white,
-                                      ),
-                                    ),
-                                    if (!_isChangingPassword)
-                                      TextButton.icon(
-                                        onPressed: () => setState(() => _isChangingPassword = true),
-                                        icon: const Icon(Icons.lock),
-                                        label: const Text('Change Password'),
-                                        style: TextButton.styleFrom(
-                                          foregroundColor: Colors.blue[400],
-                                        ),
-                                      ),
-                                  ],
-                                ),
-                                const Divider(height: 24, color: Colors.grey),
-                                if (_isChangingPassword) ...[
-                                  TextField(
-                                    controller: _currentPasswordController,
-                                    style: GoogleFonts.poppins(color: Colors.white),
-                                    obscureText: true,
-                                    decoration: InputDecoration(
-                                      labelText: 'Current Password',
-                                      labelStyle: GoogleFonts.poppins(color: Colors.grey[600]),
-                                      prefixIcon: Icon(Icons.lock, color: Colors.grey[600]),
-                                      filled: true,
-                                      fillColor: const Color(0xFF2A2A2A),
-                                      border: OutlineInputBorder(
-                                        borderRadius: BorderRadius.circular(12),
-                                        borderSide: BorderSide.none,
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(height: 16),
-                                  TextField(
-                                    controller: _newPasswordController,
-                                    style: GoogleFonts.poppins(color: Colors.white),
-                                    obscureText: true,
-                                    decoration: InputDecoration(
-                                      labelText: 'New Password',
-                                      labelStyle: GoogleFonts.poppins(color: Colors.grey[600]),
-                                      prefixIcon: Icon(Icons.lock, color: Colors.grey[600]),
-                                      filled: true,
-                                      fillColor: const Color(0xFF2A2A2A),
-                                      border: OutlineInputBorder(
-                                        borderRadius: BorderRadius.circular(12),
-                                        borderSide: BorderSide.none,
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(height: 16),
-                                  TextField(
-                                    controller: _confirmPasswordController,
-                                    style: GoogleFonts.poppins(color: Colors.white),
-                                    obscureText: true,
-                                    decoration: InputDecoration(
-                                      labelText: 'Confirm Password',
-                                      labelStyle: GoogleFonts.poppins(color: Colors.grey[600]),
-                                      prefixIcon: Icon(Icons.lock, color: Colors.grey[600]),
-                                      filled: true,
-                                      fillColor: const Color(0xFF2A2A2A),
-                                      border: OutlineInputBorder(
-                                        borderRadius: BorderRadius.circular(12),
-                                        borderSide: BorderSide.none,
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(height: 16),
-                                  Row(
-                                    children: [
-                                      Expanded(
-                                        child: ElevatedButton(
-                                          onPressed: _isLoading ? null : _changePassword,
-                                          style: ElevatedButton.styleFrom(
-                                            backgroundColor: const Color(0xFF5B7CFF),
-                                            padding: const EdgeInsets.symmetric(vertical: 12),
-                                          ),
-                                          child: _isLoading
-                                              ? const SizedBox(
-                                                  height: 20,
-                                                  width: 20,
-                                                  child: CircularProgressIndicator(
-                                                    strokeWidth: 2,
-                                                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                                                  ),
-                                                )
-                                              : const Text('Update Password'),
-                                        ),
-                                      ),
-                                      const SizedBox(width: 12),
-                                      Expanded(
-                                        child: TextButton(
-                                          onPressed: () {
-                                            setState(() => _isChangingPassword = false);
-                                            _currentPasswordController.clear();
-                                            _newPasswordController.clear();
-                                            _confirmPasswordController.clear();
-                                          },
-                                          child: const Text('Cancel'),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ] else
-                                  Text(
-                                    'Keep your password secure. Change it regularly.',
-                                    style: GoogleFonts.poppins(
-                                      fontSize: 14,
-                                      color: Colors.grey[400],
-                                    ),
-                                  ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
+                    ],
                   ),
                 ),
-    );
-  }
-
-  Widget _buildInitialAvatar() {
-    return Container(
-      color: Theme.of(context).colorScheme.primary,
-      child: Center(
-        child: Text(
-          _currentTeacher!.initial,
-          style: GoogleFonts.poppins(
-            fontSize: 48,
-            fontWeight: FontWeight.bold,
-            color: Colors.white,
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildInfoRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 12.0),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 120,
-            child: Text(
-              label,
-              style: GoogleFonts.poppins(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: Theme.of(context).colorScheme.primary,
-              ),
+                const SizedBox(height: 16),
+                Text(_teacher!.name, style: GoogleFonts.poppins(
+                  fontSize: 20, fontWeight: FontWeight.w600, color: AppTheme.textPrimary,
+                )),
+                const SizedBox(height: 4),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    AppTheme.chip(_teacher!.initial, bg: AppTheme.primaryBlueLight, fg: AppTheme.primaryBlue),
+                    const SizedBox(width: 8),
+                    Text('•', style: AppTheme.caption),
+                    const SizedBox(width: 8),
+                    Flexible(child: Text(_teacher!.homeDepartment, style: AppTheme.caption, overflow: TextOverflow.ellipsis)),
+                  ],
+                ),
+              ],
             ),
           ),
-          Expanded(
-            child: Text(
-              value,
-              style: GoogleFonts.poppins(
-                fontSize: 14,
-                color: Colors.white,
-              ),
+
+          const SizedBox(height: 16),
+
+          // Professional Info
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: AppTheme.cleanCardDecoration,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                AppTheme.sectionHeader('Professional Info', icon: Icons.work_outline),
+                const SizedBox(height: 8),
+                _profileField('FULL NAME', _nameCtrl, Icons.person_outline),
+                _profileField('TEACHER INITIAL', null, Icons.badge_outlined, value: _teacher!.initial),
+                _profileField('DESIGNATION', _designationCtrl, Icons.school_outlined),
+                _profileField('DEPARTMENT', _deptCtrl, Icons.business_outlined),
+              ],
             ),
           ),
+
+          const SizedBox(height: 16),
+
+          // Contact & Communication
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: AppTheme.cleanCardDecoration,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                AppTheme.sectionHeader('Contact & Communication', icon: Icons.mail_outline),
+                const SizedBox(height: 8),
+                _profileField('OFFICIAL EMAIL', _emailCtrl, Icons.email_outlined),
+                _profileField('PHONE NUMBER', _phoneCtrl, Icons.phone_outlined),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
+          // Security
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: AppTheme.cleanCardDecoration,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                AppTheme.sectionHeader('Security', icon: Icons.lock_outline),
+                const SizedBox(height: 4),
+                Text('Manage your account password and security settings', style: AppTheme.caption),
+                const SizedBox(height: 16),
+
+                if (!_changingPassword)
+                  InkWell(
+                    onTap: () => setState(() => _changingPassword = true),
+                    borderRadius: BorderRadius.circular(AppTheme.radiusM),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                      decoration: BoxDecoration(
+                        color: AppTheme.inputFill,
+                        borderRadius: BorderRadius.circular(AppTheme.radiusM),
+                        border: Border.all(color: AppTheme.borderLight),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.lock_outline, color: AppTheme.textSecondary, size: 20),
+                          const SizedBox(width: 12),
+                          Expanded(child: Text('Update Password', style: AppTheme.bodyMedium)),
+                          const Icon(Icons.edit_outlined, color: AppTheme.textHint, size: 18),
+                        ],
+                      ),
+                    ),
+                  )
+                else ...[
+                  TextField(
+                    controller: _currentPwCtrl,
+                    obscureText: _obscureCurrent,
+                    decoration: AppTheme.inputDecoration(
+                      label: 'Current Password',
+                      prefixIcon: Icons.lock_outline,
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          _obscureCurrent ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                          size: 20, color: AppTheme.textHint,
+                        ),
+                        onPressed: () => setState(() => _obscureCurrent = !_obscureCurrent),
+                      ),
+                    ),
+                    style: GoogleFonts.poppins(fontSize: 14, color: AppTheme.textPrimary),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _newPwCtrl,
+                    obscureText: _obscureNew,
+                    decoration: AppTheme.inputDecoration(
+                      label: 'New Password',
+                      prefixIcon: Icons.lock_reset_outlined,
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          _obscureNew ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                          size: 20, color: AppTheme.textHint,
+                        ),
+                        onPressed: () => setState(() => _obscureNew = !_obscureNew),
+                      ),
+                    ),
+                    style: GoogleFonts.poppins(fontSize: 14, color: AppTheme.textPrimary),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () => setState(() => _changingPassword = false),
+                          style: AppTheme.outlineButton(color: AppTheme.textSecondary),
+                          child: const Text('Cancel'),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: ElevatedButton(
+                          onPressed: _changePassword,
+                          child: const Text('Update'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 32),
         ],
       ),
     );
   }
 
-  Widget _buildEditableField(String label, TextEditingController controller) {
+  Widget _profileField(String label, TextEditingController? ctrl, IconData icon, {String? value}) {
+    final isReadOnly = ctrl == null || !_isEditing;
+    final displayValue = value ?? ctrl?.text ?? '';
+
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8.0),
-      child: TextField(
-        controller: controller,
-        style: GoogleFonts.poppins(color: Colors.white),
-        decoration: InputDecoration(
-          labelText: label,
-          labelStyle: GoogleFonts.poppins(color: Colors.grey[400]),
-          filled: true,
-          fillColor: const Color(0xFF2A2A2A),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide.none,
-          ),
-        ),
-      ),
+      padding: const EdgeInsets.only(bottom: 16),
+      child: isReadOnly
+          ? Row(
+              children: [
+                Icon(icon, size: 18, color: AppTheme.textHint),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(label, style: AppTheme.labelUpper),
+                      const SizedBox(height: 2),
+                      Text(
+                        displayValue,
+                        style: GoogleFonts.poppins(
+                          fontSize: 14, fontWeight: FontWeight.w500, color: AppTheme.textPrimary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(Icons.check_circle_outline, size: 18,
+                    color: AppTheme.successGreen.withValues(alpha: 0.5)),
+              ],
+            )
+          : TextField(
+              controller: ctrl,
+              decoration: AppTheme.inputDecoration(label: label, prefixIcon: icon),
+              style: GoogleFonts.poppins(fontSize: 14, color: AppTheme.textPrimary),
+            ),
     );
   }
 }

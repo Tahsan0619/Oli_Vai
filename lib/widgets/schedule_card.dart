@@ -1,16 +1,30 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../models/timetable_entry.dart';
 import '../services/data_repository.dart';
+import '../utils/app_theme.dart';
 
-/// Schedule card widget to display class information
+/// ═══════════════════════════════════════════════════════════════
+/// Clean Schedule Card — matches mockup card style
+/// Left accent bar · Type chip · Info rows · Cancelled state
+/// ═══════════════════════════════════════════════════════════════
+
 class ScheduleCard extends StatelessWidget {
-  final dynamic entry;
+  final TimetableEntry entry;
   final DataRepository repo;
+  final VoidCallback? onTap;
+  final bool showBatch;
+  final bool showTeacher;
+  final List<Widget>? actions;
 
   const ScheduleCard({
     super.key,
     required this.entry,
     required this.repo,
+    this.onTap,
+    this.showBatch = false,
+    this.showTeacher = true,
+    this.actions,
   });
 
   @override
@@ -19,84 +33,194 @@ class ScheduleCard extends StatelessWidget {
     final teacher = repo.teacherByInitial(entry.teacherInitial);
     final room = repo.roomById(entry.roomId);
     final batch = repo.batchById(entry.batchId);
+    final typeColor = AppTheme.typeColor(entry.type);
+    final isCancelled = entry.isCancelled;
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: const Color(0xFF2A2A2A),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: const Color(0xFF5B7CFF).withOpacity(0.3),
-          width: 1,
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        decoration: BoxDecoration(
+          color: isCancelled
+              ? AppTheme.surfaceLight
+              : Colors.white,
+          borderRadius: BorderRadius.circular(AppTheme.radiusL),
+          border: Border.all(
+            color: isCancelled
+                ? AppTheme.errorRed.withValues(alpha: 0.2)
+                : AppTheme.borderLight,
+          ),
+          boxShadow: isCancelled ? [] : AppTheme.cardShadow,
         ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Course and Time
-          Row(
+        child: IntrinsicHeight(
+          child: Row(
             children: [
-              Expanded(
-                child: Text(
-                  course?.title ?? entry.courseCode,
-                  style: GoogleFonts.poppins(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.white,
+              // Left accent bar
+              Container(
+                width: 4,
+                decoration: BoxDecoration(
+                  color: isCancelled
+                      ? AppTheme.errorRed.withValues(alpha: 0.5)
+                      : typeColor,
+                  borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(16),
+                    bottomLeft: Radius.circular(16),
                   ),
                 ),
               ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF5B7CFF).withOpacity(0.2),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  '${entry.start}-${entry.end}',
-                  style: GoogleFonts.poppins(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: const Color(0xFF5B7CFF),
+
+              // Card content
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Top row: type chip + cancelled badge + three-dot menu
+                      Row(
+                        children: [
+                          // Type chip
+                          AppTheme.chip(
+                            entry.type,
+                            bg: AppTheme.typeBgColor(entry.type),
+                            fg: typeColor,
+                          ),
+                          if (isCancelled) ...[
+                            const SizedBox(width: 8),
+                            AppTheme.chip(
+                              'Cancelled',
+                              bg: AppTheme.errorRedLight,
+                              fg: AppTheme.errorRed,
+                              icon: Icons.cancel_outlined,
+                            ),
+                          ],
+                          const Spacer(),
+                          if (onTap != null)
+                            Icon(Icons.more_vert, color: AppTheme.textHint, size: 20),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+
+                      // Course title
+                      Text(
+                        course?.title ?? entry.courseCode,
+                        style: GoogleFonts.poppins(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                          color: isCancelled
+                              ? AppTheme.textHint
+                              : AppTheme.textPrimary,
+                          decoration: isCancelled
+                              ? TextDecoration.lineThrough
+                              : null,
+                        ),
+                      ),
+                      // Course code
+                      Text(
+                        entry.courseCode,
+                        style: GoogleFonts.poppins(
+                          fontSize: 13,
+                          color: AppTheme.textSecondary,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+
+                      // Info rows
+                      _infoRow(
+                        Icons.access_time_outlined,
+                        '${entry.start} - ${entry.end}',
+                      ),
+                      if (room != null || entry.mode == 'Online')
+                        _infoRow(
+                          Icons.location_on_outlined,
+                          entry.mode == 'Online'
+                              ? 'Online Portal'
+                              : room?.name ?? '',
+                        ),
+                      if (showTeacher && teacher != null)
+                        _infoRow(Icons.person_outline, teacher.name),
+                      if (showBatch && batch != null)
+                        _infoRow(Icons.people_outline, batch.name),
+                      if (entry.group != null)
+                        _infoRow(Icons.group_outlined, entry.group!),
+                      if (entry.mode == 'Online')
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: AppTheme.chip(
+                            'Online',
+                            bg: AppTheme.infoCyanLight,
+                            fg: AppTheme.accentCyan,
+                            icon: Icons.videocam_outlined,
+                          ),
+                        ),
+
+                      // Cancellation reason
+                      if (isCancelled && entry.cancellationReason != null) ...[
+                        const SizedBox(height: 8),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: AppTheme.errorRedLight,
+                            borderRadius: BorderRadius.circular(AppTheme.radiusS),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.info_outline, color: AppTheme.errorRed, size: 14),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  entry.cancellationReason!,
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 12, color: AppTheme.errorRed,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+
+                      // Action buttons
+                      if (actions != null && actions!.isNotEmpty) ...[
+                        const SizedBox(height: 12),
+                        Divider(color: AppTheme.dividerColor, height: 1),
+                        const SizedBox(height: 12),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: actions!,
+                        ),
+                      ],
+                    ],
                   ),
                 ),
               ),
             ],
           ),
-          
-          const SizedBox(height: 12),
-          
-          // Details
-          _buildDetailRow(Icons.person, teacher?.name ?? entry.teacherInitial),
-          const SizedBox(height: 8),
-          _buildDetailRow(Icons.door_front_door, 'Room ${room?.name ?? entry.roomId ?? 'N/A'}'),
-          const SizedBox(height: 8),
-          _buildDetailRow(Icons.group, batch?.name ?? entry.batchId),
-          if (entry.type != null && entry.type.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            _buildDetailRow(Icons.book, entry.type),
-          ],
-        ],
+        ),
       ),
     );
   }
 
-  Widget _buildDetailRow(IconData icon, String text) {
-    return Row(
-      children: [
-        Icon(icon, size: 16, color: Colors.grey[600]),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Text(
-            text,
-            style: GoogleFonts.poppins(
-              fontSize: 14,
-              color: Colors.grey[400],
+  Widget _infoRow(IconData icon, String text) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(
+        children: [
+          Icon(icon, size: 15, color: AppTheme.textHint),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              style: GoogleFonts.poppins(
+                fontSize: 13,
+                color: AppTheme.textSecondary,
+              ),
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
