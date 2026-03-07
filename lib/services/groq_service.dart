@@ -1,12 +1,12 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart' as http;
 
 /// Service for interacting with Groq AI API to generate timetable routines.
 class GroqService {
-  // Provide via --dart-define=GROQ_API_KEY=<your-key> at build time.
-  static const String _apiKey =
-      String.fromEnvironment('GROQ_API_KEY');
+  // Loaded from .env file at runtime.
+  static String get _apiKey => dotenv.env['GROQ_API_KEY'] ?? '';
   static const String _baseUrl = 'https://api.groq.com/openai/v1/chat/completions';
   static const String _model = 'llama-3.3-70b-versatile';
 
