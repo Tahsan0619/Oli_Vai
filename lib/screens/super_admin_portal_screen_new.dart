@@ -6,6 +6,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/batch.dart';
@@ -1176,7 +1179,7 @@ class _TimetableTabState extends State<_TimetableTab> {
               const SizedBox(width: 8),
               _SmallBtn(icon: Icons.upload_outlined, label: 'Import', onTap: _importTimetable),
               const SizedBox(width: 8),
-              _SmallBtn(icon: Icons.download_outlined, label: 'Export', onTap: _exportTimetable),
+              _SmallBtn(icon: Icons.picture_as_pdf_outlined, label: 'Export PDF', onTap: _exportTimetable),
             ],
           ),
         ),
@@ -1300,92 +1303,144 @@ class _TimetableTabState extends State<_TimetableTab> {
       );
       return;
     }
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
-      builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Export Timetable (${entries.length} entries)', style: AppTheme.heading3),
-              const SizedBox(height: 16),
-              ListTile(
-                leading: const Icon(Icons.file_download_outlined, color: AppTheme.primaryBlue),
-                title: Text('Save as JSON file', style: AppTheme.body),
-                onTap: () { Navigator.pop(ctx); _saveExportFile(entries, 'json'); },
-              ),
-              ListTile(
-                leading: const Icon(Icons.table_chart_outlined, color: AppTheme.primaryBlue),
-                title: Text('Save as CSV file', style: AppTheme.body),
-                onTap: () { Navigator.pop(ctx); _saveExportFile(entries, 'csv'); },
-              ),
-              ListTile(
-                leading: const Icon(Icons.copy_outlined, color: AppTheme.primaryBlue),
-                title: Text('Copy JSON to clipboard', style: AppTheme.body),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  Clipboard.setData(ClipboardData(text: TimetableExportImport.toJSON(entries)));
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('JSON copied to clipboard'), backgroundColor: AppTheme.successGreen),
-                  );
-                },
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
+    _exportAsPdf(entries);
   }
 
-  Future<void> _saveExportFile(List<TimetableEntry> entries, String format) async {
-    try {
-      final content = format == 'json'
-          ? TimetableExportImport.toJSON(entries)
-          : TimetableExportImport.toCSV(entries);
-      final defaultName = 'timetable_${DateTime.now().toIso8601String().split('T').first}.$format';
+  Future<void> _exportAsPdf(List<TimetableEntry> entries) async {
+    final pdf = pw.Document();
+    const days = ['Sat', 'Sun', 'Mon', 'Tue', 'Wed', 'Thu'];
+    const slotHeaders = ['09:00-10:15', '10:15-11:30', '11:30-12:45', '13:30-14:45'];
+    const slotStarts = ['09:00', '10:15', '11:30', '13:30'];
 
-      // Try save dialog first
-      final savePath = await FilePicker.platform.saveFile(
-        dialogTitle: 'Save timetable as $format',
-        fileName: defaultName,
-        type: FileType.custom,
-        allowedExtensions: [format],
+    // Group entries by batch
+    final batchIds = entries.map((e) => e.batchId).toSet().toList();
+    batchIds.sort((a, b) {
+      final ba = widget.repo.batchById(a);
+      final bb = widget.repo.batchById(b);
+      return (ba?.name ?? a).compareTo(bb?.name ?? b);
+    });
+
+    final titleStyle = pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold);
+    final headerStyle = pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold);
+    const cellPad = pw.EdgeInsets.all(3);
+
+    // Build all batch sections as widgets
+    final sections = <pw.Widget>[];
+
+    for (int bi = 0; bi < batchIds.length; bi++) {
+      final batchId = batchIds[bi];
+      final batch = widget.repo.batchById(batchId);
+      final batchName = batch?.name ?? batchId;
+      final batchSession = batch?.session ?? '';
+      final batchEntries = entries.where((e) => e.batchId == batchId).toList();
+
+      // Build grid: day -> startTime -> list of entries
+      final grid = <String, Map<String, List<TimetableEntry>>>{};
+      for (final d in days) {
+        grid[d] = {};
+        for (final s in slotStarts) {
+          grid[d]![s] = [];
+        }
+      }
+      for (final e in batchEntries) {
+        final closest = slotStarts.lastWhere(
+          (s) => s.compareTo(e.start) <= 0,
+          orElse: () => slotStarts.first,
+        );
+        grid[e.day]?[closest]?.add(e);
+      }
+
+      if (bi > 0) {
+        sections.add(pw.SizedBox(height: 20));
+      }
+
+      sections.add(
+        pw.Text(
+          'Batch: $batchName${batchSession.isNotEmpty ? ' ($batchSession)' : ''} - ${batchEntries.length} entries',
+          style: titleStyle,
+        ),
       );
+      sections.add(pw.SizedBox(height: 6));
 
-      if (savePath != null) {
-        await File(savePath).writeAsString(content);
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Saved to $savePath'), backgroundColor: AppTheme.successGreen),
-          );
-        }
-      }
-    } catch (e) {
-      // Fallback: save to app documents dir
-      try {
-        final dir = await getApplicationDocumentsDirectory();
-        final defaultName = 'timetable_${DateTime.now().toIso8601String().split('T').first}.$format';
-        final file = File('${dir.path}/$defaultName');
-        final content = format == 'json'
-            ? TimetableExportImport.toJSON(entries)
-            : TimetableExportImport.toCSV(entries);
-        await file.writeAsString(content);
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Saved to ${file.path}'), backgroundColor: AppTheme.successGreen),
-          );
-        }
-      } catch (e2) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Export failed: $e2'), backgroundColor: AppTheme.errorRed),
-          );
-        }
-      }
+      sections.add(
+        pw.TableHelper.fromTextArray(
+          border: pw.TableBorder.all(color: PdfColors.grey400, width: 0.5),
+          headerDecoration: const pw.BoxDecoration(color: PdfColors.blue50),
+          headerStyle: headerStyle,
+          cellStyle: const pw.TextStyle(fontSize: 7),
+          cellPadding: cellPad,
+          headerAlignment: pw.Alignment.center,
+          cellAlignment: pw.Alignment.center,
+          columnWidths: {
+            0: const pw.FixedColumnWidth(50),
+            for (int i = 0; i < slotHeaders.length; i++)
+              i + 1: const pw.FlexColumnWidth(),
+          },
+          headers: ['Day', ...slotHeaders],
+          data: days.map((day) {
+            return [
+              day,
+              ...slotStarts.map((slot) {
+                final cellEntries = grid[day]?[slot] ?? [];
+                if (cellEntries.isEmpty) return '';
+                return cellEntries.map((e) {
+                  final course = widget.repo.courseByCode(e.courseCode);
+                  final room = widget.repo.roomById(e.roomId);
+                  final courseName = course?.code ?? e.courseCode;
+                  final roomName = room?.name ?? '';
+                  final group = e.group != null ? ' (${e.group})' : '';
+                  return '$courseName$group\n${e.teacherInitial}\n${roomName.isNotEmpty ? roomName : e.type}';
+                }).join('\n---\n');
+              }),
+            ];
+          }).toList(),
+        ),
+      );
     }
+
+    pdf.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4.landscape,
+        margin: const pw.EdgeInsets.all(24),
+        header: (context) => pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Text('EdTE - Weekly Routine', style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold)),
+                pw.Text(
+                  'Exported: ${DateTime.now().toString().split('.').first}',
+                  style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey600),
+                ),
+              ],
+            ),
+            pw.SizedBox(height: 4),
+            pw.Text(
+              '${batchIds.length} batch(es)  |  ${entries.length} total entries  |  Break: 12:45-13:30  |  Friday: Off',
+              style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey500),
+            ),
+            pw.Divider(thickness: 0.5),
+            pw.SizedBox(height: 4),
+          ],
+        ),
+        footer: (context) => pw.Row(
+          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+          children: [
+            pw.Text('Dept. of Educational Technology & Engineering',
+                style: const pw.TextStyle(fontSize: 7, color: PdfColors.grey500)),
+            pw.Text('Page ${context.pageNumber} of ${context.pagesCount}',
+                style: const pw.TextStyle(fontSize: 7, color: PdfColors.grey500)),
+          ],
+        ),
+        build: (context) => sections,
+      ),
+    );
+
+    await Printing.layoutPdf(
+      onLayout: (format) => pdf.save(),
+      name: 'EdTE_Timetable_${DateTime.now().toIso8601String().split('T').first}',
+    );
   }
 
   void _importTimetable() {
