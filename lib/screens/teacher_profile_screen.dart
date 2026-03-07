@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../models/teacher.dart';
 import '../services/supabase_service.dart';
 import '../utils/app_theme.dart';
+import '../widgets/teacher_avatar.dart';
 
 class TeacherProfileScreen extends StatefulWidget {
   final String teacherInitial;
@@ -206,20 +207,10 @@ class _TeacherProfileScreenState extends State<TeacherProfileScreen> {
                   onTap: _isEditing ? _pickImage : null,
                   child: Stack(
                     children: [
-                      CircleAvatar(
+                      TeacherAvatar(
+                        initial: _teacher!.initial,
+                        profilePicUrl: _teacher!.profilePic,
                         radius: 46,
-                        backgroundColor: AppTheme.primaryBlueLight,
-                        backgroundImage: _teacher!.profilePic != null
-                            ? NetworkImage(_teacher!.profilePic!)
-                            : null,
-                        child: _teacher!.profilePic == null
-                            ? Text(
-                                _teacher!.initial.substring(0, _teacher!.initial.length > 2 ? 2 : _teacher!.initial.length),
-                                style: GoogleFonts.poppins(
-                                  fontSize: 24, fontWeight: FontWeight.w600, color: AppTheme.primaryBlue,
-                                ),
-                              )
-                            : null,
                       ),
                       if (_isEditing)
                         Positioned(

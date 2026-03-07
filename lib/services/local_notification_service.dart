@@ -17,7 +17,7 @@ class LocalNotificationService {
     const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
     const initSettings = InitializationSettings(android: androidSettings);
 
-    await _plugin.initialize(initSettings);
+    await _plugin.initialize(settings: initSettings);
 
     // Request notification permission on Android 13+
     final androidImpl = _plugin.resolvePlatformSpecificImplementation<
@@ -55,10 +55,10 @@ class LocalNotificationService {
 
     // Use hashCode of notification id as the int id for the local notification
     await _plugin.show(
-      notification.id.hashCode,
-      notification.title,
-      notification.body,
-      details,
+      id: notification.id.hashCode,
+      title: notification.title,
+      body: notification.body,
+      notificationDetails: details,
     );
   }
 }

@@ -9,8 +9,10 @@ import '../services/data_repository.dart';
 import '../services/supabase_service.dart';
 import '../utils/app_theme.dart';
 import '../widgets/schedule_card.dart';
+import '../widgets/teacher_avatar.dart';
 import 'monthly_routine_screen.dart';
 import 'teacher_appointment_screen.dart';
+import 'teacher_course_preference_screen.dart';
 import 'notification_screen.dart';
 import 'teacher_profile_screen.dart';
 import 'unified_login_screen_new.dart';
@@ -203,22 +205,12 @@ class _TeacherAdminPortalScreenState extends State<TeacherAdminPortalScreen> {
                       ],
                     ),
                   ),
-                  CircleAvatar(
+                  TeacherAvatar(
+                    initial: _teacherInitial,
+                    profilePicUrl: teacher?.profilePic,
                     radius: 26,
                     backgroundColor: Colors.white.withValues(alpha: 0.2),
-                    backgroundImage: teacher?.profilePic != null
-                        ? NetworkImage(teacher!.profilePic!)
-                        : null,
-                    child: teacher?.profilePic == null
-                        ? Text(
-                            _teacherInitial.length >= 2
-                                ? _teacherInitial.substring(0, 2)
-                                : _teacherInitial,
-                            style: GoogleFonts.poppins(
-                              fontSize: 14, fontWeight: FontWeight.w600, color: Colors.white,
-                            ),
-                          )
-                        : null,
+                    textColor: Colors.white,
                   ),
                 ],
               ),
@@ -260,6 +252,25 @@ class _TeacherAdminPortalScreenState extends State<TeacherAdminPortalScreen> {
                     ),
                   ),
                 ],
+              ),
+            ),
+
+            // Quick action row 2: My Courses
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              child: _quickAction(
+                Icons.school_outlined,
+                'My Course Preferences',
+                const Color(0xFF6366F1),
+                () => Navigator.push(context, MaterialPageRoute(
+                  builder: (_) => ChangeNotifierProvider.value(
+                    value: context.read<SupabaseService>(),
+                    child: TeacherCoursePreferenceScreen(
+                      teacherInitial: _teacherInitial,
+                      repo: widget.repo,
+                    ),
+                  ),
+                )),
               ),
             ),
 
@@ -542,28 +553,44 @@ class _TeacherAdminPortalScreenState extends State<TeacherAdminPortalScreen> {
       final reason = reasonCtrl.text.trim().isEmpty ? 'Cancelled by teacher' : reasonCtrl.text.trim();
       await widget.repo.cancelClass(entry, reason);
       // Trigger email notification to all students in batch + super admins + teacher
-      await context.read<SupabaseService>().sendTimetableChangeEmail(
+      final emailErr = await context.read<SupabaseService>().sendTimetableChangeEmail(
         changeType: 'cancelled',
         courseCode: entry.courseCode,
         teacherInitial: entry.teacherInitial,
         batchId: entry.batchId,
         details: 'Class cancelled. Reason: $reason',
       );
-      if (mounted) setState(() {});
+      if (mounted) {
+        if (emailErr != null) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Email notification failed: $emailErr'),
+            backgroundColor: Colors.orange,
+          ));
+        }
+        setState(() {});
+      }
     }
   }
 
   Future<void> _restoreClass(TimetableEntry entry) async {
     await widget.repo.uncancelClass(entry);
     // Trigger email notification to all students in batch + super admins + teacher
-    await context.read<SupabaseService>().sendTimetableChangeEmail(
+    final emailErr = await context.read<SupabaseService>().sendTimetableChangeEmail(
       changeType: 'restored',
       courseCode: entry.courseCode,
       teacherInitial: entry.teacherInitial,
       batchId: entry.batchId,
       details: 'Class has been restored.',
     );
-    if (mounted) setState(() {});
+    if (mounted) {
+      if (emailErr != null) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Email notification failed: $emailErr'),
+          backgroundColor: Colors.orange,
+        ));
+      }
+      setState(() {});
+    }
   }
 
   Future<void> _showRescheduleDialog(TimetableEntry entry) async {
@@ -655,14 +682,22 @@ class _TeacherAdminPortalScreenState extends State<TeacherAdminPortalScreen> {
         newMode: newMode,
       );
       // Trigger email notification to all students in batch + super admins + teacher
-      await context.read<SupabaseService>().sendTimetableChangeEmail(
+      final emailErr = await context.read<SupabaseService>().sendTimetableChangeEmail(
         changeType: 'rescheduled',
         courseCode: entry.courseCode,
         teacherInitial: entry.teacherInitial,
         batchId: entry.batchId,
         details: 'Class moved to $newDay $newStart-$newEnd ($newMode).',
       );
-      if (mounted) setState(() {});
+      if (mounted) {
+        if (emailErr != null) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Email notification failed: $emailErr'),
+            backgroundColor: Colors.orange,
+          ));
+        }
+        setState(() {});
+      }
     }
   }
 
@@ -762,14 +797,22 @@ class _TeacherAdminPortalScreenState extends State<TeacherAdminPortalScreen> {
       final newRoom = rooms.firstWhere((r) => r.id == newRoomId, orElse: () => rooms.first);
       await widget.repo.changeRoom(entry, newRoomId!);
       // Trigger email notification to all students in batch + super admins + teacher
-      await context.read<SupabaseService>().sendTimetableChangeEmail(
+      final emailErr = await context.read<SupabaseService>().sendTimetableChangeEmail(
         changeType: 'room_changed',
         courseCode: entry.courseCode,
         teacherInitial: entry.teacherInitial,
         batchId: entry.batchId,
         details: 'Room changed to ${newRoom.name}.',
       );
-      if (mounted) setState(() {});
+      if (mounted) {
+        if (emailErr != null) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Email notification failed: $emailErr'),
+            backgroundColor: Colors.orange,
+          ));
+        }
+        setState(() {});
+      }
     }
   }
 }

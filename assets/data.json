@@ -1,130 +1,373 @@
 {
   "meta": {
-    "version": "1.0.0",
+    "version": "2.0.0",
     "updated_at": "2026-01-21T10:00:00+06:00",
     "tz": "Asia/Dhaka",
-    "days_off": ["Fri"],
+    "days_off": [
+      "Fri"
+    ],
     "department": "Department of Educational Technology and Engineering",
     "university": "University of Frontier Technology, Bangladesh",
-    "slot_labels": ["08:00-09:30", "09:30-11:00", "11:00-12:30", "12:30-14:00", "14:00-15:30", "15:30-17:00"]
+    "slot_labels": [
+      "09:00-10:15",
+      "10:15-11:30",
+      "11:30-12:45",
+      "12:45-13:30",
+      "13:30-14:45"
+    ]
   },
   "teachers": [
     {
       "id": "T001",
-      "name": "Dr. Azizur Rahman",
-      "initial": "AZ",
-      "designation": "Professor",
-      "phone": "+880-1711-123456",
-      "email": "azizur.rahman@uft.edu.bd",
-      "home_department": "Educational Technology and Engineering"
+      "name": "Aditya Rajbongshi",
+      "initial": "AR",
+      "designation": "Assistant Professor",
+      "phone": "+880-1628110523",
+      "email": "aditya0001@uftb.ac.bd",
+      "home_department": "Educational Technology and Engineering",
+      "profile_pic": "EdTE/AR.png"
     },
     {
       "id": "T002",
-      "name": "Dr. Rashida Sultana",
-      "initial": "RS",
-      "designation": "Associate Professor",
-      "phone": "+880-1711-234567",
-      "email": "rashida.sultana@uft.edu.bd",
-      "home_department": "Educational Technology and Engineering"
+      "name": "Farhana Islam",
+      "initial": "FI",
+      "designation": "Assistant Professor",
+      "phone": "+880-1878499660",
+      "email": "farhana0001@uftb.ac.bd",
+      "home_department": "Educational Technology and Engineering",
+      "profile_pic": "EdTE/FI.png"
     },
     {
       "id": "T003",
-      "name": "Md. Kamal Hossain",
-      "initial": "KH",
+      "name": "Md. Ashrafuzzaman",
+      "initial": "AZ",
       "designation": "Assistant Professor",
-      "phone": "+880-1711-345678",
-      "email": "kamal.hossain@uft.edu.bd",
-      "home_department": "Educational Technology and Engineering"
+      "phone": "+880-1716504070",
+      "email": "ashraf0001@uftb.ac.bd",
+      "home_department": "Educational Technology and Engineering",
+      "profile_pic": "EdTE/AZ.png"
     },
     {
       "id": "T004",
-      "name": "Fatema Begum",
-      "initial": "FB",
-      "designation": "Lecturer",
-      "phone": "+880-1711-456789",
-      "email": "fatema.begum@uft.edu.bd",
-      "home_department": "Educational Technology and Engineering"
+      "name": "Munira Akter Lata",
+      "initial": "MA",
+      "designation": "Assistant Professor",
+      "phone": "+880-1728378207",
+      "email": "munira0001@uftb.ac.bd",
+      "home_department": "Educational Technology and Engineering",
+      "profile_pic": "EdTE/MA.png"
     },
     {
       "id": "T005",
-      "name": "Dr. Shamim Ahmed",
-      "initial": "SA",
-      "designation": "Professor",
-      "phone": "+880-1711-567890",
-      "email": "shamim.ahmed@uft.edu.bd",
-      "home_department": "Educational Technology and Engineering"
+      "name": "Syeda Zakia Nayem",
+      "initial": "SZN",
+      "designation": "Assistant Professor",
+      "phone": "+880-1933351916",
+      "email": "zakia0001@uftb.ac.bd",
+      "home_department": "Educational Technology and Engineering",
+      "profile_pic": "EdTE/SZN.png"
     },
     {
       "id": "T006",
-      "name": "Nusrat Jahan",
-      "initial": "NJ",
+      "name": "Al Faisal Bin Kashem Kanon",
+      "initial": "AFK",
       "designation": "Lecturer",
-      "phone": "+880-1711-678901",
-      "email": "nusrat.jahan@uft.edu.bd",
-      "home_department": "Educational Technology and Engineering"
+      "phone": "+880-1521227992",
+      "email": "afkanon1.bd@gmail.com",
+      "home_department": "Educational Technology and Engineering",
+      "profile_pic": "EdTE/AFK.png"
+    },
+    {
+      "id": "T007",
+      "name": "Md. Naimul Pathan",
+      "initial": "NP",
+      "designation": "Lecturer",
+      "phone": "+880-1601713099",
+      "email": "naimulpathan99@gmail.com",
+      "home_department": "Educational Technology and Engineering",
+      "profile_pic": "EdTE/NP.png"
+    },
+    {
+      "id": "T008",
+      "name": "Md. Rabbi Khan",
+      "initial": "MRK",
+      "designation": "Lecturer",
+      "phone": "+880-1989072952",
+      "email": "rabbi0001@uftb.ac.bd",
+      "home_department": "Educational Technology and Engineering",
+      "profile_pic": "EdTE/MRK.png"
+    },
+    {
+      "id": "T009",
+      "name": "Md. Rezaul Islam",
+      "initial": "RI",
+      "designation": "Lecturer",
+      "phone": "+880-1609053106",
+      "email": "rezaul0001@uftb.ac.bd",
+      "home_department": "Educational Technology and Engineering",
+      "profile_pic": "EdTE/RI.png"
+    },
+    {
+      "id": "T010",
+      "name": "Rubel Sheikh",
+      "initial": "RS",
+      "designation": "Lecturer",
+      "phone": "+880-1743502507",
+      "email": "rubel0003@uftb.ac.bd",
+      "home_department": "Educational Technology and Engineering",
+      "profile_pic": "EdTE/RS.png"
+    },
+    {
+      "id": "T011",
+      "name": "Sunjida Akter",
+      "initial": "SA",
+      "designation": "Lecturer",
+      "phone": "+880-1761401711",
+      "email": "sunjida0001@uftb.ac.bd",
+      "home_department": "Educational Technology and Engineering",
+      "profile_pic": "EdTE/SA.png"
+    },
+    {
+      "id": "T012",
+      "name": "Zannatul Ferdushie",
+      "initial": "ZF",
+      "designation": "Lecturer",
+      "phone": "+880-1624262374",
+      "email": "zannatul0001@uftb.ac.bd",
+      "home_department": "Educational Technology and Engineering",
+      "profile_pic": "EdTE/ZF.png"
+    },
+    {
+      "id": "T013",
+      "name": "Sujon Chandra Sutradhar",
+      "initial": "SCS",
+      "designation": "Lecturer",
+      "phone": "+880-1568076818",
+      "email": "sujon0001@uftb.ac.bd",
+      "home_department": "Educational Technology and Engineering",
+      "profile_pic": "EdTE/SCS.png"
+    },
+    {
+      "id": "T014",
+      "name": "Md. Sanaullah",
+      "initial": "MS",
+      "designation": "Lecturer",
+      "phone": "+880-1740827561",
+      "email": "sanaullah0001@uftb.ac.bd",
+      "home_department": "Educational Technology and Engineering",
+      "profile_pic": "EdTE/MS.png"
+    },
+    {
+      "id": "T015",
+      "name": "MD. Nahid Hasan",
+      "initial": "NH",
+      "designation": "Lecturer",
+      "phone": "+880-1727228000",
+      "email": "nahid0001@uftb.ac.bd",
+      "home_department": "Educational Technology and Engineering",
+      "profile_pic": "EdTE/NH.png"
+    },
+    {
+      "id": "T016",
+      "name": "Md. Mehedi Hasan",
+      "initial": "MH",
+      "designation": "Lecturer",
+      "phone": "+880-1732279603",
+      "email": "mehedi0001@uftb.ac.bd",
+      "home_department": "Educational Technology and Engineering",
+      "profile_pic": "EdTE/MH.png"
+    },
+    {
+      "id": "T017",
+      "name": "Rabeya Basri",
+      "initial": "RB",
+      "designation": "Lecturer",
+      "phone": "+880-1877031872",
+      "email": "rabeya0001@uftb.ac.bd",
+      "home_department": "Educational Technology and Engineering",
+      "profile_pic": "EdTE/RB.png"
     }
   ],
   "batches": [
     {
-      "id": "B001",
-      "name": "EdTE-57",
+      "id": "3rd",
+      "name": "3rd Batch",
+      "session": "2020-21"
+    },
+    {
+      "id": "4th",
+      "name": "4th Batch",
+      "session": "2021-22"
+    },
+    {
+      "id": "5th",
+      "name": "5th Batch",
+      "session": "2022-23"
+    },
+    {
+      "id": "6th",
+      "name": "6th Batch",
       "session": "2023-24"
     },
     {
-      "id": "B002",
-      "name": "EdTE-58",
+      "id": "7th",
+      "name": "7th Batch",
       "session": "2024-25"
     },
     {
-      "id": "B003",
-      "name": "EdTE-59",
-      "session": "2025-26"
+      "id": "MSC",
+      "name": "MSC",
+      "session": "MSC"
     }
   ],
   "courses": [
     {
-      "code": "ETE101",
-      "title": "Introduction to Educational Technology"
+      "code": "CC 483",
+      "title": "Capstone Course I"
     },
     {
-      "code": "ETE102",
-      "title": "Programming Fundamentals"
+      "code": "CC 484",
+      "title": "Capstone Course II"
     },
     {
-      "code": "ETE103",
-      "title": "Digital Media Production"
+      "code": "CSE 113",
+      "title": "Discrete Mathematics"
     },
     {
-      "code": "ETE201",
-      "title": "Instructional Design"
+      "code": "CSE 114",
+      "title": "Structured Programming Lab"
     },
     {
-      "code": "ETE202",
-      "title": "Web Development"
+      "code": "CSE 115",
+      "title": "Structured Programming"
     },
     {
-      "code": "ETE203",
+      "code": "CSE 201",
+      "title": "Data Structures"
+    },
+    {
+      "code": "CSE 202",
+      "title": "Data Structures Lab"
+    },
+    {
+      "code": "CSE 203",
+      "title": "Object Oriented Programming"
+    },
+    {
+      "code": "CSE 204",
+      "title": "Object Oriented Programming Lab"
+    },
+    {
+      "code": "EDU 4413",
+      "title": "Educational Research Methods"
+    },
+    {
+      "code": "ENG 407",
+      "title": "Technical English"
+    },
+    {
+      "code": "ENG 408",
+      "title": "Technical English Lab"
+    },
+    {
+      "code": "ET 117",
+      "title": "Fundamentals of Electrical Engineering"
+    },
+    {
+      "code": "ET 118",
+      "title": "Fundamentals of Electrical Engineering Lab"
+    },
+    {
+      "code": "ET 205",
+      "title": "Digital Logic Design"
+    },
+    {
+      "code": "ET 207",
+      "title": "Electronic Devices and Circuits"
+    },
+    {
+      "code": "ET 315",
+      "title": "Microprocessor and Microcontroller"
+    },
+    {
+      "code": "ET 316",
+      "title": "Microprocessor and Microcontroller Lab"
+    },
+    {
+      "code": "ET 317",
+      "title": "Computer Networks"
+    },
+    {
+      "code": "ET 318",
+      "title": "Computer Networks Lab"
+    },
+    {
+      "code": "ET 401",
+      "title": "Artificial Intelligence"
+    },
+    {
+      "code": "ET 402",
+      "title": "Artificial Intelligence Lab"
+    },
+    {
+      "code": "ET 403",
       "title": "Database Management Systems"
     },
     {
-      "code": "ETE301",
-      "title": "E-Learning Systems"
+      "code": "ET 404",
+      "title": "Database Management Systems Lab"
     },
     {
-      "code": "ETE302",
-      "title": "Mobile App Development"
+      "code": "ET 405",
+      "title": "Software Engineering"
     },
     {
-      "code": "ETE303",
-      "title": "Educational Data Analytics"
+      "code": "ICT 4459",
+      "title": "ICT in Education I"
     },
     {
-      "code": "ETE401",
-      "title": "Capstone Project"
+      "code": "ICT 4460",
+      "title": "ICT in Education I Lab"
     },
     {
-      "code": "ETE402",
-      "title": "Emerging Technologies in Education"
+      "code": "ICT 4461",
+      "title": "ICT in Education II"
+    },
+    {
+      "code": "ICT 4462",
+      "title": "ICT in Education II Lab"
+    },
+    {
+      "code": "ICTE 4439",
+      "title": "ICT in Technical Education"
+    },
+    {
+      "code": "MATH 209",
+      "title": "Calculus and Linear Algebra"
+    },
+    {
+      "code": "MATH 217",
+      "title": "Statistics and Probability"
+    },
+    {
+      "code": "MSC",
+      "title": "MSC Lecture"
+    },
+    {
+      "code": "NEM 481",
+      "title": "Numerical and Estimation Methods"
+    },
+    {
+      "code": "NEM 482",
+      "title": "Numerical and Estimation Methods Lab"
+    },
+    {
+      "code": "PROG 111",
+      "title": "Introduction to Programming"
+    },
+    {
+      "code": "PROG 112",
+      "title": "Introduction to Programming Lab"
     }
   ],
   "rooms": [
@@ -173,54 +416,997 @@
       "name": "5701 (LAB)"
     }
   ],
-  "students": [
+  "students": [],
+  "timetable": [
     {
-      "student_id": "2023010101",
-      "name": "Ahmed Ali",
-      "batch_id": "B001"
+      "day": "Sat",
+      "batch_id": "7th",
+      "teacher_initial": "AZ",
+      "course_code": "ET 118",
+      "type": "Sessional",
+      "group": "G2",
+      "room_id": "2701",
+      "mode": "Offline",
+      "start": "09:00",
+      "end": "10:15",
+      "is_cancelled": false
     },
     {
-      "student_id": "2023010102",
-      "name": "Fatima Khan",
-      "batch_id": "B001"
+      "day": "Sat",
+      "batch_id": "7th",
+      "teacher_initial": "AZ",
+      "course_code": "ET 118",
+      "type": "Sessional",
+      "group": "G1",
+      "room_id": "2701",
+      "mode": "Offline",
+      "start": "10:15",
+      "end": "11:30",
+      "is_cancelled": false
     },
     {
-      "student_id": "2023010103",
-      "name": "Rahman Sheikh",
-      "batch_id": "B001"
+      "day": "Sat",
+      "batch_id": "6th",
+      "teacher_initial": "NP",
+      "course_code": "CSE 203",
+      "type": "Tutorial",
+      "group": null,
+      "room_id": "2001",
+      "mode": "Offline",
+      "start": "10:15",
+      "end": "11:30",
+      "is_cancelled": false
     },
     {
-      "student_id": "2024010101",
-      "name": "Sadia Islam",
-      "batch_id": "B002"
+      "day": "Sat",
+      "batch_id": "6th",
+      "teacher_initial": "RS",
+      "course_code": "CSE 201",
+      "type": "Lecture",
+      "group": null,
+      "room_id": "2001",
+      "mode": "Offline",
+      "start": "11:30",
+      "end": "12:45",
+      "is_cancelled": false
     },
     {
-      "student_id": "2024010102",
-      "name": "Mehedi Hasan",
-      "batch_id": "B002"
+      "day": "Sat",
+      "batch_id": "5th",
+      "teacher_initial": "SA",
+      "course_code": "CC 483",
+      "type": "Lecture",
+      "group": null,
+      "room_id": "2001",
+      "mode": "Offline",
+      "start": "10:15",
+      "end": "11:30",
+      "is_cancelled": false
     },
     {
-      "student_id": "2024010103",
-      "name": "Tasnim Ahmed",
-      "batch_id": "B002"
+      "day": "Sat",
+      "batch_id": "5th",
+      "teacher_initial": "AFK",
+      "course_code": "ET 316",
+      "type": "Sessional",
+      "group": "G1",
+      "room_id": "4701",
+      "mode": "Offline",
+      "start": "11:30",
+      "end": "12:45",
+      "is_cancelled": false
     },
     {
-      "student_id": "2025010101",
-      "name": "Rifat Mahmud",
-      "batch_id": "B003"
+      "day": "Sat",
+      "batch_id": "5th",
+      "teacher_initial": "AFK",
+      "course_code": "ET 316",
+      "type": "Sessional",
+      "group": "G2",
+      "room_id": "4701",
+      "mode": "Offline",
+      "start": "13:30",
+      "end": "14:45",
+      "is_cancelled": false
     },
     {
-      "student_id": "2025010102",
-      "name": "Nadia Rahman",
-      "batch_id": "B003"
+      "day": "Sat",
+      "batch_id": "4th",
+      "teacher_initial": "AR",
+      "course_code": "ET 402",
+      "type": "Sessional",
+      "group": "G1",
+      "room_id": "4701",
+      "mode": "Offline",
+      "start": "09:00",
+      "end": "10:15",
+      "is_cancelled": false
     },
     {
-      "student_id": "2025010103",
-      "name": "Sakib Hassan",
-      "batch_id": "B003"
+      "day": "Sat",
+      "batch_id": "4th",
+      "teacher_initial": "AR",
+      "course_code": "ET 402",
+      "type": "Sessional",
+      "group": "G2",
+      "room_id": "4701",
+      "mode": "Offline",
+      "start": "10:15",
+      "end": "11:30",
+      "is_cancelled": false
+    },
+    {
+      "day": "Sat",
+      "batch_id": "4th",
+      "teacher_initial": "AZ",
+      "course_code": "ET 403",
+      "type": "Lecture",
+      "group": null,
+      "room_id": "2001",
+      "mode": "Offline",
+      "start": "11:30",
+      "end": "12:45",
+      "is_cancelled": false
+    },
+    {
+      "day": "Sat",
+      "batch_id": "MSC",
+      "teacher_initial": "RS",
+      "course_code": "MSC",
+      "type": "Lecture",
+      "group": null,
+      "room_id": "4001",
+      "mode": "Offline",
+      "start": "09:00",
+      "end": "10:15",
+      "is_cancelled": false
+    },
+    {
+      "day": "Sat",
+      "batch_id": "MSC",
+      "teacher_initial": "RS",
+      "course_code": "MSC",
+      "type": "Lecture",
+      "group": null,
+      "room_id": "4001",
+      "mode": "Offline",
+      "start": "10:15",
+      "end": "11:30",
+      "is_cancelled": false
+    },
+    {
+      "day": "Sat",
+      "batch_id": "MSC",
+      "teacher_initial": "NP",
+      "course_code": "MSC",
+      "type": "Lecture",
+      "group": null,
+      "room_id": "4001",
+      "mode": "Offline",
+      "start": "11:30",
+      "end": "12:45",
+      "is_cancelled": false
+    },
+    {
+      "day": "Sat",
+      "batch_id": "MSC",
+      "teacher_initial": "NP",
+      "course_code": "MSC",
+      "type": "Lecture",
+      "group": null,
+      "room_id": "4001",
+      "mode": "Offline",
+      "start": "13:30",
+      "end": "14:45",
+      "is_cancelled": false
+    },
+    {
+      "day": "Sun",
+      "batch_id": "7th",
+      "teacher_initial": "AZ",
+      "course_code": "ET 117",
+      "type": "Lecture",
+      "group": null,
+      "room_id": "4001",
+      "mode": "Offline",
+      "start": "09:00",
+      "end": "10:15",
+      "is_cancelled": false
+    },
+    {
+      "day": "Sun",
+      "batch_id": "7th",
+      "teacher_initial": "FI",
+      "course_code": "PROG 111",
+      "type": "Lecture",
+      "group": null,
+      "room_id": "4001",
+      "mode": "Offline",
+      "start": "10:15",
+      "end": "11:30",
+      "is_cancelled": false
+    },
+    {
+      "day": "Sun",
+      "batch_id": "7th",
+      "teacher_initial": "RI",
+      "course_code": "CSE 114",
+      "type": "Sessional",
+      "group": "G1",
+      "room_id": "4701",
+      "mode": "Offline",
+      "start": "11:30",
+      "end": "12:45",
+      "is_cancelled": false
+    },
+    {
+      "day": "Sun",
+      "batch_id": "7th",
+      "teacher_initial": "RI",
+      "course_code": "CSE 114",
+      "type": "Sessional",
+      "group": "G2",
+      "room_id": "4701",
+      "mode": "Offline",
+      "start": "13:30",
+      "end": "14:45",
+      "is_cancelled": false
+    },
+    {
+      "day": "Sun",
+      "batch_id": "6th",
+      "teacher_initial": "MH",
+      "course_code": "MATH 217",
+      "type": "Lecture",
+      "group": null,
+      "room_id": "1001",
+      "mode": "Offline",
+      "start": "10:15",
+      "end": "11:30",
+      "is_cancelled": false
+    },
+    {
+      "day": "Sun",
+      "batch_id": "6th",
+      "teacher_initial": "MRK",
+      "course_code": "ET 205",
+      "type": "Lecture",
+      "group": null,
+      "room_id": "2001",
+      "mode": "Offline",
+      "start": "11:30",
+      "end": "12:45",
+      "is_cancelled": false
+    },
+    {
+      "day": "Sun",
+      "batch_id": "6th",
+      "teacher_initial": "NP",
+      "course_code": "CSE 203",
+      "type": "Lecture",
+      "group": null,
+      "room_id": "2001",
+      "mode": "Offline",
+      "start": "13:30",
+      "end": "14:45",
+      "is_cancelled": false
+    },
+    {
+      "day": "Sun",
+      "batch_id": "5th",
+      "teacher_initial": "SA",
+      "course_code": "CC 484",
+      "type": "Sessional",
+      "group": "G1",
+      "room_id": "4701",
+      "mode": "Offline",
+      "start": "09:00",
+      "end": "10:15",
+      "is_cancelled": false
+    },
+    {
+      "day": "Sun",
+      "batch_id": "5th",
+      "teacher_initial": "SA",
+      "course_code": "CC 484",
+      "type": "Sessional",
+      "group": "G2",
+      "room_id": "4701",
+      "mode": "Offline",
+      "start": "10:15",
+      "end": "11:30",
+      "is_cancelled": false
+    },
+    {
+      "day": "Sun",
+      "batch_id": "5th",
+      "teacher_initial": "AFK",
+      "course_code": "ET 315",
+      "type": "Lecture",
+      "group": null,
+      "room_id": "1001",
+      "mode": "Offline",
+      "start": "11:30",
+      "end": "12:45",
+      "is_cancelled": false
+    },
+    {
+      "day": "Sun",
+      "batch_id": "5th",
+      "teacher_initial": "MRK",
+      "course_code": "ET 317",
+      "type": "Lecture",
+      "group": null,
+      "room_id": "1001",
+      "mode": "Offline",
+      "start": "13:30",
+      "end": "14:45",
+      "is_cancelled": false
+    },
+    {
+      "day": "Sun",
+      "batch_id": "4th",
+      "teacher_initial": "NH",
+      "course_code": "ENG 407",
+      "type": "Lecture",
+      "group": null,
+      "room_id": "1001",
+      "mode": "Offline",
+      "start": "09:00",
+      "end": "10:15",
+      "is_cancelled": false
+    },
+    {
+      "day": "Sun",
+      "batch_id": "4th",
+      "teacher_initial": "AFK",
+      "course_code": "EDU 4413",
+      "type": "Lecture",
+      "group": null,
+      "room_id": "2001",
+      "mode": "Offline",
+      "start": "10:15",
+      "end": "11:30",
+      "is_cancelled": false
+    },
+    {
+      "day": "Sun",
+      "batch_id": "4th",
+      "teacher_initial": "MA",
+      "course_code": "ET 405",
+      "type": "Lecture",
+      "group": null,
+      "room_id": "2001",
+      "mode": "Offline",
+      "start": "13:30",
+      "end": "14:45",
+      "is_cancelled": false
+    },
+    {
+      "day": "Mon",
+      "batch_id": "7th",
+      "teacher_initial": "RI",
+      "course_code": "CSE 115",
+      "type": "Lecture",
+      "group": null,
+      "room_id": "2001",
+      "mode": "Offline",
+      "start": "09:00",
+      "end": "10:15",
+      "is_cancelled": false
+    },
+    {
+      "day": "Mon",
+      "batch_id": "7th",
+      "teacher_initial": "RI",
+      "course_code": "CSE 113",
+      "type": "Lecture",
+      "group": null,
+      "room_id": "2001",
+      "mode": "Offline",
+      "start": "10:15",
+      "end": "11:30",
+      "is_cancelled": false
+    },
+    {
+      "day": "Mon",
+      "batch_id": "7th",
+      "teacher_initial": "FI",
+      "course_code": "PROG 112",
+      "type": "Sessional",
+      "group": "G2",
+      "room_id": "4701",
+      "mode": "Offline",
+      "start": "11:30",
+      "end": "12:45",
+      "is_cancelled": false
+    },
+    {
+      "day": "Mon",
+      "batch_id": "7th",
+      "teacher_initial": "FI",
+      "course_code": "PROG 112",
+      "type": "Sessional",
+      "group": "G1",
+      "room_id": "4701",
+      "mode": "Offline",
+      "start": "13:30",
+      "end": "14:45",
+      "is_cancelled": false
+    },
+    {
+      "day": "Mon",
+      "batch_id": "6th",
+      "teacher_initial": "AFK",
+      "course_code": "ET 207",
+      "type": "Lecture",
+      "group": null,
+      "room_id": "4001",
+      "mode": "Offline",
+      "start": "09:00",
+      "end": "10:15",
+      "is_cancelled": false
+    },
+    {
+      "day": "Mon",
+      "batch_id": "6th",
+      "teacher_initial": "MH",
+      "course_code": "MATH 217",
+      "type": "Tutorial",
+      "group": null,
+      "room_id": "2001",
+      "mode": "Offline",
+      "start": "11:30",
+      "end": "12:45",
+      "is_cancelled": false
+    },
+    {
+      "day": "Mon",
+      "batch_id": "5th",
+      "teacher_initial": "SA",
+      "course_code": "CC 483",
+      "type": "Tutorial",
+      "group": null,
+      "room_id": "1001",
+      "mode": "Offline",
+      "start": "10:15",
+      "end": "11:30",
+      "is_cancelled": false
+    },
+    {
+      "day": "Mon",
+      "batch_id": "5th",
+      "teacher_initial": "AFK",
+      "course_code": "ET 315",
+      "type": "Tutorial",
+      "group": null,
+      "room_id": "1001",
+      "mode": "Offline",
+      "start": "11:30",
+      "end": "12:45",
+      "is_cancelled": false
+    },
+    {
+      "day": "Mon",
+      "batch_id": "5th",
+      "teacher_initial": "MA",
+      "course_code": "NEM 481",
+      "type": "Lecture",
+      "group": null,
+      "room_id": "4001",
+      "mode": "Offline",
+      "start": "13:30",
+      "end": "14:45",
+      "is_cancelled": false
+    },
+    {
+      "day": "Mon",
+      "batch_id": "4th",
+      "teacher_initial": "AZ",
+      "course_code": "ET 404",
+      "type": "Sessional",
+      "group": "G1",
+      "room_id": "4701",
+      "mode": "Offline",
+      "start": "09:00",
+      "end": "10:15",
+      "is_cancelled": false
+    },
+    {
+      "day": "Mon",
+      "batch_id": "4th",
+      "teacher_initial": "AZ",
+      "course_code": "ET 404",
+      "type": "Sessional",
+      "group": "G2",
+      "room_id": "4701",
+      "mode": "Offline",
+      "start": "10:15",
+      "end": "11:30",
+      "is_cancelled": false
+    },
+    {
+      "day": "Mon",
+      "batch_id": "4th",
+      "teacher_initial": "AR",
+      "course_code": "ET 401",
+      "type": "Lecture",
+      "group": null,
+      "room_id": "2001",
+      "mode": "Offline",
+      "start": "13:30",
+      "end": "14:45",
+      "is_cancelled": false
+    },
+    {
+      "day": "Mon",
+      "batch_id": "3rd",
+      "teacher_initial": "SA",
+      "course_code": "ICTE 4439",
+      "type": "Lecture",
+      "group": null,
+      "room_id": "1001",
+      "mode": "Offline",
+      "start": "09:00",
+      "end": "10:15",
+      "is_cancelled": false
+    },
+    {
+      "day": "Mon",
+      "batch_id": "3rd",
+      "teacher_initial": "FI",
+      "course_code": "ICT 4461",
+      "type": "Lecture",
+      "group": null,
+      "room_id": "4001",
+      "mode": "Offline",
+      "start": "10:15",
+      "end": "11:30",
+      "is_cancelled": false
+    },
+    {
+      "day": "Mon",
+      "batch_id": "3rd",
+      "teacher_initial": "AR",
+      "course_code": "ICT 4459",
+      "type": "Lecture",
+      "group": null,
+      "room_id": "4001",
+      "mode": "Offline",
+      "start": "11:30",
+      "end": "12:45",
+      "is_cancelled": false
+    },
+    {
+      "day": "Mon",
+      "batch_id": "3rd",
+      "teacher_initial": "AFK",
+      "course_code": "EDU 4413",
+      "type": "Tutorial",
+      "group": null,
+      "room_id": "1001",
+      "mode": "Offline",
+      "start": "13:30",
+      "end": "14:45",
+      "is_cancelled": false
+    },
+    {
+      "day": "Tue",
+      "batch_id": "7th",
+      "teacher_initial": "AZ",
+      "course_code": "ET 117",
+      "type": "Tutorial",
+      "group": null,
+      "room_id": "4001",
+      "mode": "Offline",
+      "start": "09:00",
+      "end": "10:15",
+      "is_cancelled": false
+    },
+    {
+      "day": "Tue",
+      "batch_id": "7th",
+      "teacher_initial": "RI",
+      "course_code": "CSE 113",
+      "type": "Tutorial",
+      "group": null,
+      "room_id": "2001",
+      "mode": "Offline",
+      "start": "10:15",
+      "end": "11:30",
+      "is_cancelled": false
+    },
+    {
+      "day": "Tue",
+      "batch_id": "7th",
+      "teacher_initial": "MH",
+      "course_code": "MATH 209",
+      "type": "Lecture",
+      "group": null,
+      "room_id": "1001",
+      "mode": "Offline",
+      "start": "11:30",
+      "end": "12:45",
+      "is_cancelled": false
+    },
+    {
+      "day": "Tue",
+      "batch_id": "6th",
+      "teacher_initial": "RS",
+      "course_code": "CSE 201",
+      "type": "Tutorial",
+      "group": null,
+      "room_id": "2001",
+      "mode": "Offline",
+      "start": "09:00",
+      "end": "10:15",
+      "is_cancelled": false
+    },
+    {
+      "day": "Tue",
+      "batch_id": "6th",
+      "teacher_initial": "AFK",
+      "course_code": "ET 207",
+      "type": "Tutorial",
+      "group": null,
+      "room_id": "4001",
+      "mode": "Offline",
+      "start": "10:15",
+      "end": "11:30",
+      "is_cancelled": false
+    },
+    {
+      "day": "Tue",
+      "batch_id": "5th",
+      "teacher_initial": "MRK",
+      "course_code": "ET 318",
+      "type": "Sessional",
+      "group": "G1",
+      "room_id": "2701",
+      "mode": "Offline",
+      "start": "09:00",
+      "end": "10:15",
+      "is_cancelled": false
+    },
+    {
+      "day": "Tue",
+      "batch_id": "5th",
+      "teacher_initial": "MRK",
+      "course_code": "ET 318",
+      "type": "Sessional",
+      "group": "G2",
+      "room_id": "2701",
+      "mode": "Offline",
+      "start": "10:15",
+      "end": "11:30",
+      "is_cancelled": false
+    },
+    {
+      "day": "Tue",
+      "batch_id": "5th",
+      "teacher_initial": "MA",
+      "course_code": "NEM 481",
+      "type": "Tutorial",
+      "group": null,
+      "room_id": "2001",
+      "mode": "Offline",
+      "start": "11:30",
+      "end": "12:45",
+      "is_cancelled": false
+    },
+    {
+      "day": "Tue",
+      "batch_id": "4th",
+      "teacher_initial": "NH",
+      "course_code": "ENG 407",
+      "type": "Tutorial",
+      "group": null,
+      "room_id": "1001",
+      "mode": "Offline",
+      "start": "09:00",
+      "end": "10:15",
+      "is_cancelled": false
+    },
+    {
+      "day": "Tue",
+      "batch_id": "4th",
+      "teacher_initial": "AZ",
+      "course_code": "ET 403",
+      "type": "Tutorial",
+      "group": null,
+      "room_id": "1001",
+      "mode": "Offline",
+      "start": "10:15",
+      "end": "11:30",
+      "is_cancelled": false
+    },
+    {
+      "day": "Tue",
+      "batch_id": "4th",
+      "teacher_initial": "MA",
+      "course_code": "ET 405",
+      "type": "Tutorial",
+      "group": null,
+      "room_id": "4001",
+      "mode": "Offline",
+      "start": "13:30",
+      "end": "14:45",
+      "is_cancelled": false
+    },
+    {
+      "day": "Tue",
+      "batch_id": "3rd",
+      "teacher_initial": "AR",
+      "course_code": "ICT 4460",
+      "type": "Sessional",
+      "group": "G1",
+      "room_id": "4701",
+      "mode": "Offline",
+      "start": "09:00",
+      "end": "10:15",
+      "is_cancelled": false
+    },
+    {
+      "day": "Tue",
+      "batch_id": "3rd",
+      "teacher_initial": "AR",
+      "course_code": "ICT 4460",
+      "type": "Sessional",
+      "group": "G2",
+      "room_id": "4701",
+      "mode": "Offline",
+      "start": "10:15",
+      "end": "11:30",
+      "is_cancelled": false
+    },
+    {
+      "day": "Tue",
+      "batch_id": "3rd",
+      "teacher_initial": "FI",
+      "course_code": "ICT 4462",
+      "type": "Sessional",
+      "group": "G1",
+      "room_id": "4701",
+      "mode": "Offline",
+      "start": "11:30",
+      "end": "12:45",
+      "is_cancelled": false
+    },
+    {
+      "day": "Tue",
+      "batch_id": "3rd",
+      "teacher_initial": "FI",
+      "course_code": "ICT 4462",
+      "type": "Sessional",
+      "group": "G2",
+      "room_id": "4701",
+      "mode": "Offline",
+      "start": "13:30",
+      "end": "14:45",
+      "is_cancelled": false
+    },
+    {
+      "day": "Wed",
+      "batch_id": "7th",
+      "teacher_initial": "RI",
+      "course_code": "CSE 115",
+      "type": "Tutorial",
+      "group": null,
+      "room_id": "4001",
+      "mode": "Offline",
+      "start": "09:00",
+      "end": "10:15",
+      "is_cancelled": false
+    },
+    {
+      "day": "Wed",
+      "batch_id": "7th",
+      "teacher_initial": "FI",
+      "course_code": "PROG 111",
+      "type": "Tutorial",
+      "group": null,
+      "room_id": "4001",
+      "mode": "Offline",
+      "start": "10:15",
+      "end": "11:30",
+      "is_cancelled": false
+    },
+    {
+      "day": "Wed",
+      "batch_id": "7th",
+      "teacher_initial": "MH",
+      "course_code": "MATH 209",
+      "type": "Tutorial",
+      "group": null,
+      "room_id": "2001",
+      "mode": "Offline",
+      "start": "11:30",
+      "end": "12:45",
+      "is_cancelled": false
+    },
+    {
+      "day": "Wed",
+      "batch_id": "6th",
+      "teacher_initial": "RS",
+      "course_code": "CSE 202",
+      "type": "Sessional",
+      "group": "G1",
+      "room_id": "4701",
+      "mode": "Offline",
+      "start": "09:00",
+      "end": "10:15",
+      "is_cancelled": false
+    },
+    {
+      "day": "Wed",
+      "batch_id": "6th",
+      "teacher_initial": "NP",
+      "course_code": "CSE 204",
+      "type": "Sessional",
+      "group": "G2",
+      "room_id": "2701",
+      "mode": "Offline",
+      "start": "09:00",
+      "end": "10:15",
+      "is_cancelled": false
+    },
+    {
+      "day": "Wed",
+      "batch_id": "6th",
+      "teacher_initial": "RS",
+      "course_code": "CSE 202",
+      "type": "Sessional",
+      "group": "G2",
+      "room_id": "4701",
+      "mode": "Offline",
+      "start": "10:15",
+      "end": "11:30",
+      "is_cancelled": false
+    },
+    {
+      "day": "Wed",
+      "batch_id": "6th",
+      "teacher_initial": "NP",
+      "course_code": "CSE 204",
+      "type": "Sessional",
+      "group": "G1",
+      "room_id": "2701",
+      "mode": "Offline",
+      "start": "10:15",
+      "end": "11:30",
+      "is_cancelled": false
+    },
+    {
+      "day": "Wed",
+      "batch_id": "6th",
+      "teacher_initial": "MRK",
+      "course_code": "ET 205",
+      "type": "Tutorial",
+      "group": null,
+      "room_id": "4001",
+      "mode": "Offline",
+      "start": "13:30",
+      "end": "14:45",
+      "is_cancelled": false
+    },
+    {
+      "day": "Wed",
+      "batch_id": "5th",
+      "teacher_initial": "MRK",
+      "course_code": "ET 317",
+      "type": "Tutorial",
+      "group": null,
+      "room_id": "1001",
+      "mode": "Offline",
+      "start": "10:15",
+      "end": "11:30",
+      "is_cancelled": false
+    },
+    {
+      "day": "Wed",
+      "batch_id": "5th",
+      "teacher_initial": "MA",
+      "course_code": "NEM 482",
+      "type": "Sessional",
+      "group": "G1",
+      "room_id": "4701",
+      "mode": "Offline",
+      "start": "11:30",
+      "end": "12:45",
+      "is_cancelled": false
+    },
+    {
+      "day": "Wed",
+      "batch_id": "5th",
+      "teacher_initial": "MA",
+      "course_code": "NEM 482",
+      "type": "Sessional",
+      "group": "G2",
+      "room_id": "4701",
+      "mode": "Offline",
+      "start": "13:30",
+      "end": "14:45",
+      "is_cancelled": false
+    },
+    {
+      "day": "Wed",
+      "batch_id": "4th",
+      "teacher_initial": "AR",
+      "course_code": "ET 401",
+      "type": "Tutorial",
+      "group": null,
+      "room_id": "2001",
+      "mode": "Offline",
+      "start": "09:00",
+      "end": "10:15",
+      "is_cancelled": false
+    },
+    {
+      "day": "Wed",
+      "batch_id": "4th",
+      "teacher_initial": "NH",
+      "course_code": "ENG 408",
+      "type": "Sessional",
+      "group": "G1",
+      "room_id": "2701",
+      "mode": "Offline",
+      "start": "11:30",
+      "end": "12:45",
+      "is_cancelled": false
+    },
+    {
+      "day": "Wed",
+      "batch_id": "4th",
+      "teacher_initial": "NH",
+      "course_code": "ENG 408",
+      "type": "Sessional",
+      "group": "G2",
+      "room_id": "2701",
+      "mode": "Offline",
+      "start": "13:30",
+      "end": "14:45",
+      "is_cancelled": false
+    },
+    {
+      "day": "Wed",
+      "batch_id": "3rd",
+      "teacher_initial": "SA",
+      "course_code": "ICTE 4439",
+      "type": "Tutorial",
+      "group": null,
+      "room_id": "1001",
+      "mode": "Offline",
+      "start": "09:00",
+      "end": "10:15",
+      "is_cancelled": false
+    },
+    {
+      "day": "Wed",
+      "batch_id": "3rd",
+      "teacher_initial": "AR",
+      "course_code": "ICT 4459",
+      "type": "Tutorial",
+      "group": null,
+      "room_id": "1001",
+      "mode": "Offline",
+      "start": "10:15",
+      "end": "11:30",
+      "is_cancelled": false
+    },
+    {
+      "day": "Wed",
+      "batch_id": "3rd",
+      "teacher_initial": "FI",
+      "course_code": "ICT 4461",
+      "type": "Tutorial",
+      "group": null,
+      "room_id": "4001",
+      "mode": "Offline",
+      "start": "11:30",
+      "end": "12:45",
+      "is_cancelled": false
     }
   ],
-  "timetable": [],
   "admins": [
     {
       "id": "A001",
@@ -231,46 +1417,122 @@
     },
     {
       "id": "A002",
+      "username": "AR",
+      "password": "ar123",
+      "type": "teacher_admin",
+      "teacher_initial": "AR"
+    },
+    {
+      "id": "A003",
+      "username": "FI",
+      "password": "fi123",
+      "type": "teacher_admin",
+      "teacher_initial": "FI"
+    },
+    {
+      "id": "A004",
       "username": "AZ",
       "password": "az123",
       "type": "teacher_admin",
       "teacher_initial": "AZ"
     },
     {
-      "id": "A003",
+      "id": "A005",
+      "username": "MA",
+      "password": "ma123",
+      "type": "teacher_admin",
+      "teacher_initial": "MA"
+    },
+    {
+      "id": "A006",
+      "username": "SZN",
+      "password": "szn123",
+      "type": "teacher_admin",
+      "teacher_initial": "SZN"
+    },
+    {
+      "id": "A007",
+      "username": "AFK",
+      "password": "afk123",
+      "type": "teacher_admin",
+      "teacher_initial": "AFK"
+    },
+    {
+      "id": "A008",
+      "username": "NP",
+      "password": "np123",
+      "type": "teacher_admin",
+      "teacher_initial": "NP"
+    },
+    {
+      "id": "A009",
+      "username": "MRK",
+      "password": "mrk123",
+      "type": "teacher_admin",
+      "teacher_initial": "MRK"
+    },
+    {
+      "id": "A010",
+      "username": "RI",
+      "password": "ri123",
+      "type": "teacher_admin",
+      "teacher_initial": "RI"
+    },
+    {
+      "id": "A011",
       "username": "RS",
       "password": "rs123",
       "type": "teacher_admin",
       "teacher_initial": "RS"
     },
     {
-      "id": "A004",
-      "username": "KH",
-      "password": "kh123",
-      "type": "teacher_admin",
-      "teacher_initial": "KH"
-    },
-    {
-      "id": "A005",
-      "username": "FB",
-      "password": "fb123",
-      "type": "teacher_admin",
-      "teacher_initial": "FB"
-    },
-    {
-      "id": "A006",
+      "id": "A012",
       "username": "SA",
       "password": "sa123",
       "type": "teacher_admin",
       "teacher_initial": "SA"
     },
     {
-      "id": "A007",
-      "username": "NJ",
-      "password": "nj123",
+      "id": "A013",
+      "username": "ZF",
+      "password": "zf123",
       "type": "teacher_admin",
-      "teacher_initial": "NJ"
+      "teacher_initial": "ZF"
+    },
+    {
+      "id": "A014",
+      "username": "SCS",
+      "password": "scs123",
+      "type": "teacher_admin",
+      "teacher_initial": "SCS"
+    },
+    {
+      "id": "A015",
+      "username": "MS",
+      "password": "ms123",
+      "type": "teacher_admin",
+      "teacher_initial": "MS"
+    },
+    {
+      "id": "A016",
+      "username": "NH",
+      "password": "nh123",
+      "type": "teacher_admin",
+      "teacher_initial": "NH"
+    },
+    {
+      "id": "A017",
+      "username": "MH",
+      "password": "mh123",
+      "type": "teacher_admin",
+      "teacher_initial": "MH"
+    },
+    {
+      "id": "A018",
+      "username": "RB",
+      "password": "rb123",
+      "type": "teacher_admin",
+      "teacher_initial": "RB"
     }
   ]
 }
-

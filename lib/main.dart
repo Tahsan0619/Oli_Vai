@@ -48,7 +48,7 @@ class RoutineScrapperApp extends StatelessWidget {
       },
       child: MaterialApp(
         debugShowCheckedModeBanner: false,
-        title: 'EDTE Routine',
+        title: 'SomoySutro',
         theme: AppTheme.lightTheme,
         home: const AuthCheck(),
         onGenerateRoute: (settings) {

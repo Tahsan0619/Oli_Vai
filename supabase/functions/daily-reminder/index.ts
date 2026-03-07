@@ -126,7 +126,7 @@ serve(async (_req: Request) => {
                 </tbody>
               </table>
               <p style="color: #9ca3af; font-size: 12px; text-align: center; margin-top: 16px;">
-                EDTE Routine System — Automated Daily Reminder
+                SomoySutro — Automated Daily Reminder
               </p>
             </div>
           </div>
@@ -140,7 +140,7 @@ serve(async (_req: Request) => {
               Authorization: `Bearer ${RESEND_API_KEY}`,
             },
             body: JSON.stringify({
-              from: "EDTE Routine <notifications@edte.edu>",
+              from: "SomoySutro <notifications@edte.edu>",
               to: [student.email],
               subject: `Tomorrow's Schedule: ${batchEntries.length} class(es) on ${tomorrowDay}`,
               html,

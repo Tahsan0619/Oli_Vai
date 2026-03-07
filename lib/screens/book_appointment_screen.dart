@@ -5,6 +5,7 @@ import '../models/appointment.dart';
 import '../models/teacher.dart';
 import '../services/supabase_service.dart';
 import '../utils/app_theme.dart';
+import '../widgets/teacher_avatar.dart';
 
 /// Student-side screen to book an appointment with a specific teacher.
 class BookAppointmentScreen extends StatefulWidget {
@@ -148,20 +149,10 @@ class _BookAppointmentScreenState extends State<BookAppointmentScreen> {
             ),
             child: Row(
               children: [
-                CircleAvatar(
+                TeacherAvatar(
+                  initial: teacher.initial,
+                  profilePicUrl: teacher.profilePic,
                   radius: 26,
-                  backgroundColor: AppTheme.primaryBlueLight,
-                  backgroundImage: teacher.profilePic != null
-                      ? NetworkImage(teacher.profilePic!)
-                      : null,
-                  child: teacher.profilePic == null
-                      ? Text(
-                          teacher.initial.substring(0, teacher.initial.length > 2 ? 2 : teacher.initial.length),
-                          style: GoogleFonts.poppins(
-                            fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.primaryBlue,
-                          ),
-                        )
-                      : null,
                 ),
                 const SizedBox(width: 14),
                 Expanded(

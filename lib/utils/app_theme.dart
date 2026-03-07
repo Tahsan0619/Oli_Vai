@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 /// ═══════════════════════════════════════════════════════════════
-/// EDTE Routine — Clean Light Design System
+/// SomoySutro — Clean Light Design System
 /// Inspired by modern educational app UIs
 /// ═══════════════════════════════════════════════════════════════
 

@@ -1,8 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/batch.dart';
@@ -17,7 +20,9 @@ import '../utils/app_theme.dart';
 import '../utils/timetable_export_import.dart';
 import '../models/notification_model.dart';
 import 'add_edit_schedule_screen.dart';
+import 'ai_routine_generation_screen.dart';
 import 'notification_screen.dart';
+import '../widgets/teacher_avatar.dart';
 
 class SuperAdminPortalScreenNew extends StatefulWidget {
   const SuperAdminPortalScreenNew({super.key});
@@ -274,6 +279,14 @@ class _DashboardTab extends StatelessWidget {
         const SizedBox(height: 8),
         _QuickAction(icon: Icons.school_outlined, label: 'Manage Academic',
           onTap: () => onNavigate(3)),
+        const SizedBox(height: 8),
+        _QuickAction(icon: Icons.auto_awesome_outlined, label: 'AI Routine Generator',
+          onTap: () => Navigator.push(context, MaterialPageRoute(
+            builder: (_) => ChangeNotifierProvider.value(
+              value: context.read<SupabaseService>(),
+              child: AiRoutineGenerationScreen(repo: repo),
+            ),
+          ))),
 
         const SizedBox(height: 32),
       ],
@@ -425,11 +438,10 @@ class _UsersTabState extends State<_UsersTab> {
                 children: [
                   ListTile(
                     contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                    leading: CircleAvatar(
-                      backgroundColor: AppTheme.primaryBlueLight,
-                      backgroundImage: t.profilePic != null ? NetworkImage(t.profilePic!) : null,
-                      child: t.profilePic == null ? Text(t.initial.substring(0, t.initial.length > 2 ? 2 : t.initial.length),
-                        style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.primaryBlue)) : null,
+                    leading: TeacherAvatar(
+                      initial: t.initial,
+                      profilePicUrl: t.profilePic,
+                      radius: 20,
                     ),
                     title: Text(t.name, style: AppTheme.bodyMedium),
                     subtitle: Text('${t.initial} • ${t.designation}', style: AppTheme.caption),
@@ -753,7 +765,7 @@ class _UsersTabState extends State<_UsersTab> {
         await widget.svc.createNotification(AppNotification(
           id: '',
           type: 'general',
-          title: 'Welcome to EDTE!',
+          title: 'Welcome to SomoySutro!',
           body: 'You have been added as a teacher by Super Admin. Initial: ${t.initial}',
           recipientType: 'teacher',
           recipientId: t.initial,
@@ -1153,6 +1165,15 @@ class _TimetableTabState extends State<_TimetableTab> {
             children: [
               Text('${filtered.length} entries', style: AppTheme.caption),
               const Spacer(),
+              _SmallBtn(icon: Icons.auto_awesome_outlined, label: 'AI Generate', onTap: () {
+                Navigator.push(context, MaterialPageRoute(
+                  builder: (_) => ChangeNotifierProvider.value(
+                    value: context.read<SupabaseService>(),
+                    child: AiRoutineGenerationScreen(repo: widget.repo),
+                  ),
+                ));
+              }),
+              const SizedBox(width: 8),
               _SmallBtn(icon: Icons.upload_outlined, label: 'Import', onTap: _importTimetable),
               const SizedBox(width: 8),
               _SmallBtn(icon: Icons.download_outlined, label: 'Export', onTap: _exportTimetable),
@@ -1273,14 +1294,193 @@ class _TimetableTabState extends State<_TimetableTab> {
 
   void _exportTimetable() {
     final entries = widget.repo.getAllTimetableEntries();
-    final jsonStr = TimetableExportImport.toJSON(entries);
-    Clipboard.setData(ClipboardData(text: jsonStr));
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Timetable JSON copied to clipboard'), backgroundColor: AppTheme.successGreen),
+    if (entries.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No entries to export'), backgroundColor: AppTheme.errorRed),
+      );
+      return;
+    }
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Export Timetable (${entries.length} entries)', style: AppTheme.heading3),
+              const SizedBox(height: 16),
+              ListTile(
+                leading: const Icon(Icons.file_download_outlined, color: AppTheme.primaryBlue),
+                title: Text('Save as JSON file', style: AppTheme.body),
+                onTap: () { Navigator.pop(ctx); _saveExportFile(entries, 'json'); },
+              ),
+              ListTile(
+                leading: const Icon(Icons.table_chart_outlined, color: AppTheme.primaryBlue),
+                title: Text('Save as CSV file', style: AppTheme.body),
+                onTap: () { Navigator.pop(ctx); _saveExportFile(entries, 'csv'); },
+              ),
+              ListTile(
+                leading: const Icon(Icons.copy_outlined, color: AppTheme.primaryBlue),
+                title: Text('Copy JSON to clipboard', style: AppTheme.body),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  Clipboard.setData(ClipboardData(text: TimetableExportImport.toJSON(entries)));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('JSON copied to clipboard'), backgroundColor: AppTheme.successGreen),
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
+  Future<void> _saveExportFile(List<TimetableEntry> entries, String format) async {
+    try {
+      final content = format == 'json'
+          ? TimetableExportImport.toJSON(entries)
+          : TimetableExportImport.toCSV(entries);
+      final defaultName = 'timetable_${DateTime.now().toIso8601String().split('T').first}.$format';
+
+      // Try save dialog first
+      final savePath = await FilePicker.platform.saveFile(
+        dialogTitle: 'Save timetable as $format',
+        fileName: defaultName,
+        type: FileType.custom,
+        allowedExtensions: [format],
+      );
+
+      if (savePath != null) {
+        await File(savePath).writeAsString(content);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Saved to $savePath'), backgroundColor: AppTheme.successGreen),
+          );
+        }
+      }
+    } catch (e) {
+      // Fallback: save to app documents dir
+      try {
+        final dir = await getApplicationDocumentsDirectory();
+        final defaultName = 'timetable_${DateTime.now().toIso8601String().split('T').first}.$format';
+        final file = File('${dir.path}/$defaultName');
+        final content = format == 'json'
+            ? TimetableExportImport.toJSON(entries)
+            : TimetableExportImport.toCSV(entries);
+        await file.writeAsString(content);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Saved to ${file.path}'), backgroundColor: AppTheme.successGreen),
+          );
+        }
+      } catch (e2) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Export failed: $e2'), backgroundColor: AppTheme.errorRed),
+          );
+        }
+      }
+    }
+  }
+
   void _importTimetable() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Import Timetable', style: AppTheme.heading3),
+              const SizedBox(height: 16),
+              ListTile(
+                leading: const Icon(Icons.file_upload_outlined, color: AppTheme.primaryBlue),
+                title: Text('Import from file (JSON / CSV)', style: AppTheme.body),
+                subtitle: Text('Pick a .json or .csv file', style: AppTheme.caption),
+                onTap: () { Navigator.pop(ctx); _importFromFile(); },
+              ),
+              ListTile(
+                leading: const Icon(Icons.paste_outlined, color: AppTheme.primaryBlue),
+                title: Text('Paste JSON data', style: AppTheme.body),
+                subtitle: Text('Paste timetable JSON from clipboard', style: AppTheme.caption),
+                onTap: () { Navigator.pop(ctx); _importFromPaste(); },
+              ),
+              const Divider(),
+              ListTile(
+                leading: const Icon(Icons.description_outlined, color: Colors.grey),
+                title: Text('Copy CSV template', style: AppTheme.body),
+                onTap: () {
+                  Clipboard.setData(ClipboardData(text: TimetableExportImport.getCSVTemplate()));
+                  Navigator.pop(ctx);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('CSV template copied to clipboard'), backgroundColor: AppTheme.successGreen),
+                  );
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.description_outlined, color: Colors.grey),
+                title: Text('Copy JSON template', style: AppTheme.body),
+                onTap: () {
+                  Clipboard.setData(ClipboardData(text: TimetableExportImport.getJSONTemplate()));
+                  Navigator.pop(ctx);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('JSON template copied to clipboard'), backgroundColor: AppTheme.successGreen),
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _importFromFile() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['json', 'csv'],
+        withData: true,
+      );
+      if (result == null || result.files.isEmpty) return;
+
+      final file = result.files.first;
+      final String content;
+      if (file.bytes != null) {
+        content = utf8.decode(file.bytes!);
+      } else if (file.path != null) {
+        content = await File(file.path!).readAsString();
+      } else {
+        throw Exception('Could not read file');
+      }
+
+      final ext = file.extension?.toLowerCase() ?? '';
+      List<TimetableEntry> entries;
+      if (ext == 'csv') {
+        entries = TimetableExportImport.fromCSV(content);
+      } else {
+        entries = TimetableExportImport.fromJSON(content);
+      }
+
+      await _processImport(entries);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Import failed: $e'), backgroundColor: AppTheme.errorRed),
+        );
+      }
+    }
+  }
+
+  void _importFromPaste() {
     final ctrl = TextEditingController();
     showDialog(
       context: context,
@@ -1309,7 +1509,16 @@ class _TimetableTabState extends State<_TimetableTab> {
           ElevatedButton(
             onPressed: () async {
               Navigator.pop(ctx);
-              await _processImport(ctrl.text);
+              try {
+                final entries = TimetableExportImport.fromJSON(ctrl.text);
+                await _processImport(entries);
+              } catch (e) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Invalid JSON: $e'), backgroundColor: AppTheme.errorRed),
+                  );
+                }
+              }
             },
             child: const Text('Import'),
           ),
@@ -1318,34 +1527,58 @@ class _TimetableTabState extends State<_TimetableTab> {
     );
   }
 
-  Future<void> _processImport(String jsonStr) async {
+  Future<void> _processImport(List<TimetableEntry> entries) async {
+    if (entries.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No entries found in file'), backgroundColor: AppTheme.errorRed),
+        );
+      }
+      return;
+    }
+
+    final errors = TimetableExportImport.validateEntries(entries);
+    if (errors.isNotEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Validation: ${errors.first}${errors.length > 1 ? ' (+${errors.length - 1} more)' : ''}'),
+          backgroundColor: AppTheme.errorRed,
+          duration: const Duration(seconds: 4),
+        ));
+      }
+      return;
+    }
+
+    // Show progress dialog
+    if (mounted) {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppTheme.radiusL)),
+          content: Row(
+            children: [
+              const CircularProgressIndicator(),
+              const SizedBox(width: 20),
+              Text('Importing ${entries.length} entries...', style: AppTheme.body),
+            ],
+          ),
+        ),
+      );
+    }
+
     try {
-      final decoded = jsonDecode(jsonStr);
-      final List<dynamic> entriesJson = decoded['entries'];
-      final entries = entriesJson.map((e) => TimetableEntry.fromJson(e)).toList();
-      final errors = TimetableExportImport.validateEntries(entries);
-      if (errors.isNotEmpty) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('Validation errors: ${errors.first}'),
-            backgroundColor: AppTheme.errorRed,
-          ));
-        }
-        return;
-      }
-      int added = 0;
-      for (final e in entries) {
-        await widget.svc.addTimetableEntry(e);
-        added++;
-      }
+      final count = await widget.svc.bulkAddTimetableEntries(entries);
+      if (mounted) Navigator.of(context).pop(); // close progress
       widget.onRefresh();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Imported $added entries successfully'),
+          content: Text('Imported $count entries successfully'),
           backgroundColor: AppTheme.successGreen,
         ));
       }
     } catch (e) {
+      if (mounted) Navigator.of(context).pop(); // close progress
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text('Import failed: $e'),

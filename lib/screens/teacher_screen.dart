@@ -6,6 +6,7 @@ import '../services/supabase_service.dart';
 import '../models/teacher.dart';
 import '../utils/app_theme.dart';
 import '../widgets/schedule_card.dart';
+import '../widgets/teacher_avatar.dart';
 import 'book_appointment_screen.dart';
 import 'monthly_routine_screen.dart';
 
@@ -135,20 +136,10 @@ class _TeacherScreenState extends State<TeacherScreen> {
             Row(
               children: [
                 // Profile avatar
-                CircleAvatar(
+                TeacherAvatar(
+                  initial: teacher.initial,
+                  profilePicUrl: teacher.profilePic,
                   radius: 26,
-                  backgroundColor: AppTheme.primaryBlueLight,
-                  backgroundImage: teacher.profilePic != null
-                      ? NetworkImage(teacher.profilePic!)
-                      : null,
-                  child: teacher.profilePic == null
-                      ? Text(
-                          teacher.initial.substring(0, teacher.initial.length > 2 ? 2 : teacher.initial.length),
-                          style: GoogleFonts.poppins(
-                            fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.primaryBlue,
-                          ),
-                        )
-                      : null,
                 ),
                 const SizedBox(width: 14),
                 Expanded(
@@ -205,20 +196,10 @@ class _TeacherScreenState extends State<TeacherScreen> {
             children: [
               Row(
                 children: [
-                  CircleAvatar(
+                  TeacherAvatar(
+                    initial: teacher.initial,
+                    profilePicUrl: teacher.profilePic,
                     radius: 32,
-                    backgroundColor: AppTheme.primaryBlueLight,
-                    backgroundImage: teacher.profilePic != null
-                        ? NetworkImage(teacher.profilePic!)
-                        : null,
-                    child: teacher.profilePic == null
-                        ? Text(
-                            teacher.initial.substring(0, teacher.initial.length > 2 ? 2 : teacher.initial.length),
-                            style: GoogleFonts.poppins(
-                              fontSize: 18, fontWeight: FontWeight.w600, color: AppTheme.primaryBlue,
-                            ),
-                          )
-                        : null,
                   ),
                   const SizedBox(width: 16),
                   Expanded(

@@ -162,7 +162,7 @@ class _StudentProfileScreenState extends State<StudentProfileScreen> {
                     const SizedBox(width: 8),
                     Text('•', style: AppTheme.caption),
                     const SizedBox(width: 8),
-                    Text(student.batchId, style: AppTheme.caption),
+                    Text(svc.batchNameById(student.batchId), style: AppTheme.caption),
                   ],
                 ),
               ],
@@ -182,7 +182,7 @@ class _StudentProfileScreenState extends State<StudentProfileScreen> {
                 const SizedBox(height: 8),
                 _infoTile('STUDENT ID', student.studentId, Icons.badge_outlined),
                 _infoTile('FULL NAME', student.name, Icons.person_outline),
-                _infoTile('BATCH', student.batchId, Icons.group_outlined),
+                _infoTile('BATCH', svc.batchNameById(student.batchId), Icons.group_outlined),
                 if (student.email != null && student.email!.isNotEmpty)
                   _infoTile('EMAIL', student.email!, Icons.email_outlined),
               ],

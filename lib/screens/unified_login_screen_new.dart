@@ -157,11 +157,14 @@ class _UnifiedLoginScreenState extends State<UnifiedLoginScreen>
                           borderRadius: BorderRadius.circular(20),
                           boxShadow: AppTheme.softShadow(AppTheme.primaryBlue),
                         ),
-                        child: const Icon(Icons.bolt_rounded, size: 36, color: Colors.white),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(12),
+                          child: Image.asset('assets/logo.jpg', width: 48, height: 48, fit: BoxFit.cover),
+                        ),
                       ),
                       const SizedBox(height: 20),
                       Text(
-                        'EDTE Routine',
+                        'SomoySutro',
                         style: GoogleFonts.poppins(
                           fontSize: 26, fontWeight: FontWeight.w700,
                           color: AppTheme.textPrimary,

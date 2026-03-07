@@ -4,6 +4,7 @@ import '../models/app_data.dart';
 import '../models/app_meta.dart';
 import '../models/notification_model.dart';
 import '../models/teacher.dart';
+import '../models/teacher_course_preference.dart';
 import '../models/batch.dart';
 import '../models/course.dart';
 import '../models/room.dart';
@@ -39,6 +40,7 @@ class DataRepository extends ChangeNotifier {
   List<Room> _rooms = [];
   List<Student> _students = [];
   List<TimetableEntry> _timetableEntries = [];
+  List<TeacherCoursePreference> _coursePreferences = [];
   
   // Map to store timetable entry IDs (for updates)
   final Map<String, String> _entryIdMap = {}; // key -> entry_id
@@ -68,6 +70,7 @@ class DataRepository extends ChangeNotifier {
         _supabaseService.getRooms(forceRefresh: true),
         _supabaseService.getStudents(forceRefresh: true),
         _supabaseService.getTimetableEntries(forceRefresh: true),
+        _supabaseService.getAllCoursePreferences(),
       ]);
 
       _teachers = results[0] as List<Teacher>;
@@ -76,6 +79,7 @@ class DataRepository extends ChangeNotifier {
       _rooms = results[3] as List<Room>;
       _students = results[4] as List<Student>;
       _timetableEntries = results[5] as List<TimetableEntry>;
+      _coursePreferences = results[6] as List<TeacherCoursePreference>;
 
       // Build entry ID map for efficient lookups
       _buildEntryIdMap();
@@ -240,16 +244,25 @@ class DataRepository extends ChangeNotifier {
   /// Add new timetable entry (super admin only)
   Future<void> addTimetableEntry(TimetableEntry entry) async {
     await _supabaseService.addTimetableEntry(entry);
-    // Send notification to the assigned teacher
+    final batchName = batchById(entry.batchId)?.name ?? entry.batchId;
+    // Send in-app notification to the assigned teacher
     await _supabaseService.createNotification(AppNotification(
       id: '',
       type: 'general',
       title: 'New Class Assigned',
-      body: 'You have been assigned ${entry.courseCode} on ${entry.day} (${entry.start}-${entry.end}) for batch ${entry.batchId}.',
+      body: 'You have been assigned ${entry.courseCode} on ${entry.day} (${entry.start}-${entry.end}) for batch $batchName.',
       recipientType: 'teacher',
       recipientId: entry.teacherInitial,
       createdAt: '',
     ));
+    // Send email notification
+    await _supabaseService.sendTimetableChangeEmail(
+      changeType: 'class_assigned',
+      courseCode: entry.courseCode,
+      teacherInitial: entry.teacherInitial,
+      batchId: entry.batchId,
+      details: 'New class assigned: ${entry.day} ${entry.start}-${entry.end} (${entry.mode}) for batch $batchName.',
+    );
     await load(); // Reload data
   }
 
@@ -258,13 +271,14 @@ class DataRepository extends ChangeNotifier {
     final key = _getEntryKey(original);
     final entryId = _entryIdMap[key];
     if (entryId != null) {
+      final batchName = batchById(updated.batchId)?.name ?? updated.batchId;
       await _supabaseService.updateTimetableEntry(entryId, updated);
       // Notify the teacher about the update
       await _supabaseService.createNotification(AppNotification(
         id: '',
         type: 'general',
         title: 'Class Schedule Updated',
-        body: '${updated.courseCode} on ${updated.day} (${updated.start}-${updated.end}) for batch ${updated.batchId} has been updated.',
+        body: '${updated.courseCode} on ${updated.day} (${updated.start}-${updated.end}) for batch $batchName has been updated.',
         recipientType: 'teacher',
         recipientId: updated.teacherInitial,
         createdAt: '',
@@ -281,6 +295,14 @@ class DataRepository extends ChangeNotifier {
           createdAt: '',
         ));
       }
+      // Send email notification
+      await _supabaseService.sendTimetableChangeEmail(
+        changeType: 'class_updated',
+        courseCode: updated.courseCode,
+        teacherInitial: updated.teacherInitial,
+        batchId: updated.batchId,
+        details: 'Class updated: ${updated.day} ${updated.start}-${updated.end} (${updated.mode}) for batch $batchName.',
+      );
       await load(); // Reload data
     }
   }
@@ -332,4 +354,27 @@ class DataRepository extends ChangeNotifier {
     return courseByCode(id);
   }
 
+  // =====================================================
+  // TEACHER COURSE PREFERENCES
+  // =====================================================
+
+  /// All course preferences
+  List<TeacherCoursePreference> get coursePreferences => _coursePreferences;
+
+  /// Get preferences for a specific teacher
+  List<TeacherCoursePreference> preferencesForTeacher(String teacherInitial) {
+    return _coursePreferences
+        .where((p) => p.teacherInitial == teacherInitial)
+        .toList();
+  }
+
+  /// Get approved preferences (for AI generation)
+  List<TeacherCoursePreference> get approvedPreferences {
+    return _coursePreferences.where((p) => p.status == 'approved').toList();
+  }
+
+  /// Get pending preferences (for super admin review)
+  List<TeacherCoursePreference> get pendingPreferences {
+    return _coursePreferences.where((p) => p.status == 'pending').toList();
+  }
 }

@@ -7,6 +7,7 @@ import '../models/admin.dart';
 import '../models/appointment.dart';
 import '../models/notification_model.dart';
 import '../models/teacher.dart';
+import '../models/teacher_course_preference.dart';
 import '../models/batch.dart';
 import '../models/course.dart';
 import '../models/room.dart';
@@ -33,7 +34,7 @@ class SupabaseService extends ChangeNotifier {
   List<Room>? _cachedRooms;
   List<Student>? _cachedStudents;
 
-  static const String _adminCacheKey = 'edte_current_admin';
+  static const String _adminCacheKey = 'somoysutro_current_admin';
 
   // =====================================================
   // AUTHENTICATION
@@ -580,6 +581,16 @@ class SupabaseService extends ChangeNotifier {
     }
   }
 
+  /// Resolve batch name from cache (synchronous, returns ID if not found)
+  String batchNameById(String id) {
+    if (_cachedBatches == null) return id;
+    try {
+      return _cachedBatches!.firstWhere((b) => b.id == id).name;
+    } catch (_) {
+      return id;
+    }
+  }
+
   /// Add new batch
   Future<String?> addBatch(Batch batch) async {
     try {
@@ -1035,6 +1046,33 @@ class SupabaseService extends ChangeNotifier {
     } catch (e) {
       debugPrint('Error adding timetable entry: $e');
       return false;
+    }
+  }
+
+  /// Bulk add timetable entries in a single insert
+  Future<int> bulkAddTimetableEntries(List<TimetableEntry> entries) async {
+    try {
+      final rows = entries.map((entry) => {
+        'day': entry.day,
+        'batch_id': entry.batchId,
+        'teacher_initial': entry.teacherInitial,
+        'course_code': entry.courseCode,
+        'type': entry.type,
+        'group_name': entry.group,
+        'room_id': entry.roomId,
+        'mode': entry.mode,
+        'start_time': entry.start,
+        'end_time': entry.end,
+        'is_cancelled': entry.isCancelled,
+        'cancellation_reason': entry.cancellationReason,
+      }).toList();
+
+      await _client.from('timetable_entries').insert(rows);
+      notifyListeners();
+      return entries.length;
+    } catch (e) {
+      debugPrint('Error bulk adding timetable entries: $e');
+      return 0;
     }
   }
 
@@ -1625,8 +1663,9 @@ class SupabaseService extends ChangeNotifier {
     await _client.removeChannel(channel);
   }
 
-  /// Invoke Supabase Edge Function to send email
-  Future<void> invokeEmailFunction({
+  /// Invoke Supabase Edge Function to send email.
+  /// Returns a short error string on failure, or null on success.
+  Future<String?> invokeEmailFunction({
     required String functionName,
     required Map<String, dynamic> body,
   }) async {
@@ -1639,20 +1678,46 @@ class SupabaseService extends ChangeNotifier {
       );
       debugPrint('[EMAIL] <<< Response status: ${response.status}');
       debugPrint('[EMAIL] <<< Response data: ${response.data}');
+
+      // Parse the response to check for warnings (e.g. 0 recipients)
+      if (response.data is Map) {
+        final data = response.data as Map;
+        final sent = data['sent'] ?? 0;
+        final total = data['total'] ?? 0;
+        final warning = data['warning'];
+        final errors = data['errors'];
+        debugPrint('[EMAIL] <<< Sent: $sent/$total');
+        if (warning != null) {
+          debugPrint('[EMAIL] !!! WARNING from edge function: $warning');
+          return 'No recipients: $warning';
+        }
+        if (errors != null) {
+          debugPrint('[EMAIL] !!! Partial failures: $errors');
+          return 'Sent $sent/$total emails. Errors: $errors';
+        }
+        if (sent == 0 && total == 0) {
+          return 'No email recipients found. Check email_enabled and email fields.';
+        }
+      }
+      return null; // success
     } on FunctionException catch (e) {
       debugPrint('[EMAIL] !!! FunctionException invoking $functionName');
       debugPrint('[EMAIL] !!! Status: ${e.status}');
       debugPrint('[EMAIL] !!! Details: ${e.details}');
       debugPrint('[EMAIL] !!! reasonPhrase: ${e.reasonPhrase}');
-    } catch (e, stack) {
+      if (e.status == 404) {
+        return 'Edge function not deployed. Deploy with: supabase functions deploy send-notification-email';
+      }
+      return e.reasonPhrase ?? 'Email function error (status ${e.status})';
+    } catch (e) {
       debugPrint('[EMAIL] !!! Error invoking edge function $functionName: $e');
-      debugPrint('[EMAIL] !!! Stack: $stack');
+      return 'Email error: $e';
     }
   }
 
-  /// Trigger email notification for a timetable change
-  /// This calls the Edge Function which uses Brevo to send emails
-  Future<void> sendTimetableChangeEmail({
+  /// Trigger email notification for a timetable change.
+  /// Returns null on success, or an error message string on failure.
+  Future<String?> sendTimetableChangeEmail({
     required String changeType,
     required String courseCode,
     required String teacherInitial,
@@ -1660,21 +1725,197 @@ class SupabaseService extends ChangeNotifier {
     required String details,
   }) async {
     debugPrint('[EMAIL] sendTimetableChangeEmail called: type=$changeType, course=$courseCode, teacher=$teacherInitial, batch=$batchId');
-    try {
-      await invokeEmailFunction(
-        functionName: 'send-notification-email',
-        body: {
-          'change_type': changeType,
-          'course_code': courseCode,
-          'teacher_initial': teacherInitial,
-          'batch_id': batchId,
-          'details': details,
-        },
-      );
+    final err = await invokeEmailFunction(
+      functionName: 'send-notification-email',
+      body: {
+        'change_type': changeType,
+        'course_code': courseCode,
+        'teacher_initial': teacherInitial,
+        'batch_id': batchId,
+        'details': details,
+      },
+    );
+    if (err != null) {
+      debugPrint('[EMAIL] !!! sendTimetableChangeEmail FAILED: $err');
+    } else {
       debugPrint('[EMAIL] sendTimetableChangeEmail completed successfully');
-    } catch (e, stack) {
-      debugPrint('[EMAIL] !!! sendTimetableChangeEmail FAILED: $e');
-      debugPrint('[EMAIL] !!! Stack: $stack');
+    }
+    return err;
+  }
+
+  // =====================================================
+  // TEACHER COURSE PREFERENCES
+  // =====================================================
+
+  /// Get all course preferences
+  Future<List<TeacherCoursePreference>> getAllCoursePreferences() async {
+    try {
+      final response = await _client
+          .from('teacher_course_preferences')
+          .select()
+          .order('created_at', ascending: false);
+      return (response as List)
+          .map((e) => TeacherCoursePreference.fromJson(e))
+          .toList();
+    } catch (e) {
+      debugPrint('Error fetching all course preferences: $e');
+      return [];
+    }
+  }
+
+  /// Get course preferences for a specific teacher
+  Future<List<TeacherCoursePreference>> getTeacherCoursePreferences(
+      String teacherInitial) async {
+    try {
+      final response = await _client
+          .from('teacher_course_preferences')
+          .select()
+          .eq('teacher_initial', teacherInitial)
+          .order('created_at', ascending: false);
+      return (response as List)
+          .map((e) => TeacherCoursePreference.fromJson(e))
+          .toList();
+    } catch (e) {
+      debugPrint('Error fetching teacher course preferences: $e');
+      return [];
+    }
+  }
+
+  /// Add a new course preference
+  Future<TeacherCoursePreference?> addCoursePreference(
+      TeacherCoursePreference pref) async {
+    try {
+      final response = await _client
+          .from('teacher_course_preferences')
+          .insert(pref.toInsertJson())
+          .select()
+          .single();
+      notifyListeners();
+      return TeacherCoursePreference.fromJson(response);
+    } catch (e) {
+      debugPrint('Error adding course preference: $e');
+      return null;
+    }
+  }
+
+  /// Update a course preference
+  Future<bool> updateCoursePreference(
+      String id, TeacherCoursePreference pref) async {
+    try {
+      await _client
+          .from('teacher_course_preferences')
+          .update(pref.toInsertJson())
+          .eq('id', id);
+      notifyListeners();
+      return true;
+    } catch (e) {
+      debugPrint('Error updating course preference: $e');
+      return false;
+    }
+  }
+
+  /// Delete a course preference
+  Future<bool> deleteCoursePreference(String id) async {
+    try {
+      await _client.from('teacher_course_preferences').delete().eq('id', id);
+      notifyListeners();
+      return true;
+    } catch (e) {
+      debugPrint('Error deleting course preference: $e');
+      return false;
+    }
+  }
+
+  /// Update preference status (super admin: approve/reject)
+  Future<bool> updateCoursePreferenceStatus(String id, String status) async {
+    try {
+      await _client
+          .from('teacher_course_preferences')
+          .update({'status': status})
+          .eq('id', id);
+      notifyListeners();
+      return true;
+    } catch (e) {
+      debugPrint('Error updating preference status: $e');
+      return false;
+    }
+  }
+
+  // =====================================================
+  // AI ROUTINE GENERATION — BULK OPS
+  // =====================================================
+
+  /// Replace entire timetable with AI-generated entries.
+  /// Deletes all existing entries and inserts the new ones.
+  Future<bool> replaceAllTimetableEntries(
+      List<Map<String, dynamic>> entries) async {
+    try {
+      // Delete all existing entries
+      await _client.from('timetable_entries').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+
+      // Insert all new entries
+      if (entries.isNotEmpty) {
+        await _client.from('timetable_entries').insert(entries);
+      }
+
+      notifyListeners();
+      return true;
+    } catch (e) {
+      debugPrint('Error replacing timetable entries: $e');
+      return false;
+    }
+  }
+
+  /// Insert AI-generated entries (append mode — keeps existing, adds new).
+  Future<bool> appendTimetableEntries(
+      List<Map<String, dynamic>> entries) async {
+    try {
+      if (entries.isNotEmpty) {
+        await _client.from('timetable_entries').insert(entries);
+      }
+      notifyListeners();
+      return true;
+    } catch (e) {
+      debugPrint('Error appending timetable entries: $e');
+      return false;
+    }
+  }
+
+  /// Save a routine generation history record
+  Future<bool> saveRoutineGeneration({
+    required String generatedBy,
+    required String routineTitle,
+    required int entryCount,
+    required String status,
+    String? notes,
+  }) async {
+    try {
+      await _client.from('routine_generations').insert({
+        'generated_by': generatedBy,
+        'routine_title': routineTitle,
+        'entry_count': entryCount,
+        'status': status,
+        'notes': notes,
+      });
+      return true;
+    } catch (e) {
+      debugPrint('Error saving routine generation: $e');
+      return false;
+    }
+  }
+
+  /// Get routine generation history
+  Future<List<Map<String, dynamic>>> getRoutineGenerations() async {
+    try {
+      final response = await _client
+          .from('routine_generations')
+          .select()
+          .order('created_at', ascending: false)
+          .limit(20);
+      return (response as List).cast<Map<String, dynamic>>();
+    } catch (e) {
+      debugPrint('Error fetching routine generations: $e');
+      return [];
     }
   }
 }
