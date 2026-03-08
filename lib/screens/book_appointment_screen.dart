@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../models/appointment.dart';
 import '../models/teacher.dart';
+import '../models/notification_model.dart';
 import '../services/supabase_service.dart';
 import '../utils/app_theme.dart';
 import '../widgets/teacher_avatar.dart';
@@ -102,6 +103,17 @@ class _BookAppointmentScreenState extends State<BookAppointmentScreen> {
       );
 
       await svc.createAppointment(appt);
+
+      // Notify the teacher about the new appointment
+      await svc.createNotification(AppNotification(
+        id: '',
+        type: 'appointment',
+        title: 'New Appointment Request',
+        body: '$studentName ($studentId) has requested an appointment on ${_formatDate(_selectedDate)} at ${_formatTime(_selectedTime)}.\nPurpose: ${_purposeCtrl.text.trim()}',
+        recipientType: 'teacher',
+        recipientId: widget.teacher.initial,
+        createdAt: '',
+      ));
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

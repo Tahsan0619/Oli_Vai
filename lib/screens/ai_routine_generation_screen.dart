@@ -827,6 +827,8 @@ class _GenerateTab extends StatelessWidget {
 
   Widget _entryPreviewTile(Map<String, dynamic> entry) {
     final time = '${entry['start_time'] ?? entry['start']} – ${entry['end_time'] ?? entry['end']}';
+    final roomId = entry['room_id']?.toString();
+    final roomName = (roomId != null ? repo.roomById(roomId)?.name : null) ?? '';
     return Container(
       margin: const EdgeInsets.only(bottom: 6),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -848,12 +850,17 @@ class _GenerateTab extends StatelessWidget {
             child: Text(
               '${entry['course_code']} (${entry['teacher_initial']}) — ${entry['type']}${entry['group_name'] != null ? ' [${entry['group_name']}]' : ''}',
               style: GoogleFonts.poppins(fontSize: 12, color: AppTheme.textPrimary),
+              overflow: TextOverflow.ellipsis,
+              maxLines: 2,
             ),
           ),
-          Text(
-            entry['room_id']?.toString() ?? '',
-            style: GoogleFonts.poppins(fontSize: 11, color: AppTheme.textHint),
-          ),
+          if (roomName.isNotEmpty) ...[
+            const SizedBox(width: 6),
+            Text(
+              roomName,
+              style: GoogleFonts.poppins(fontSize: 11, color: AppTheme.textHint),
+            ),
+          ],
         ],
       ),
     );

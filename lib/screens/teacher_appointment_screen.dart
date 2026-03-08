@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../models/appointment.dart';
+import '../models/notification_model.dart';
 import '../services/supabase_service.dart';
 import '../utils/app_theme.dart';
 
@@ -332,11 +333,26 @@ class _TeacherAppointmentScreenState extends State<TeacherAppointmentScreen>
     );
     if (confirmed == true) {
       final svc = context.read<SupabaseService>();
+      final remarks = remarksCtrl.text.trim().isEmpty ? null : remarksCtrl.text.trim();
       await svc.updateAppointmentStatus(
         appt.id,
         newStatus,
-        remarks: remarksCtrl.text.trim().isEmpty ? null : remarksCtrl.text.trim(),
+        remarks: remarks,
       );
+
+      // Notify the student about the teacher's response
+      final statusLabel = newStatus == 'accepted' ? 'Accepted' : 'Rejected';
+      final remarksLine = remarks != null ? '\nRemarks: $remarks' : '';
+      await svc.createNotification(AppNotification(
+        id: '',
+        type: 'appointment',
+        title: 'Appointment $statusLabel',
+        body: 'Your appointment on ${appt.date} at ${appt.time} has been $newStatus by ${widget.teacherInitial}.$remarksLine',
+        recipientType: 'student',
+        recipientId: appt.studentId,
+        createdAt: '',
+      ));
+
       await _load();
     }
   }

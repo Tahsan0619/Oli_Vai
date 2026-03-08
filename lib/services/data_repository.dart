@@ -255,6 +255,19 @@ class DataRepository extends ChangeNotifier {
       recipientId: entry.teacherInitial,
       createdAt: '',
     ));
+    // Notify all students in the batch
+    final batchStudents = await _supabaseService.getStudentsByBatchId(entry.batchId);
+    for (final student in batchStudents) {
+      await _supabaseService.createNotification(AppNotification(
+        id: '',
+        type: 'general',
+        title: 'New Class Added',
+        body: '${entry.courseCode} has been added to your schedule on ${entry.day} (${entry.start}-${entry.end}).',
+        recipientType: 'student',
+        recipientId: student.studentId,
+        createdAt: '',
+      ));
+    }
     // Send email notification
     await _supabaseService.sendTimetableChangeEmail(
       changeType: 'class_assigned',
@@ -295,6 +308,34 @@ class DataRepository extends ChangeNotifier {
           createdAt: '',
         ));
       }
+      // Notify all students in the batch about the update
+      final batchStudents = await _supabaseService.getStudentsByBatchId(updated.batchId);
+      for (final student in batchStudents) {
+        await _supabaseService.createNotification(AppNotification(
+          id: '',
+          type: 'general',
+          title: 'Class Schedule Updated',
+          body: '${updated.courseCode} on ${updated.day} (${updated.start}-${updated.end}) has been updated.',
+          recipientType: 'student',
+          recipientId: student.studentId,
+          createdAt: '',
+        ));
+      }
+      // If batch changed, also notify students in the old batch
+      if (original.batchId != updated.batchId) {
+        final oldBatchStudents = await _supabaseService.getStudentsByBatchId(original.batchId);
+        for (final student in oldBatchStudents) {
+          await _supabaseService.createNotification(AppNotification(
+            id: '',
+            type: 'general',
+            title: 'Class Removed From Schedule',
+            body: '${original.courseCode} on ${original.day} (${original.start}-${original.end}) has been removed from your batch schedule.',
+            recipientType: 'student',
+            recipientId: student.studentId,
+            createdAt: '',
+          ));
+        }
+      }
       // Send email notification
       await _supabaseService.sendTimetableChangeEmail(
         changeType: 'class_updated',
@@ -313,6 +354,30 @@ class DataRepository extends ChangeNotifier {
     final entryId = _entryIdMap[key];
     if (entryId != null) {
       await _supabaseService.deleteTimetableEntry(entryId);
+      final batchName = batchById(entry.batchId)?.name ?? entry.batchId;
+      // Notify the teacher about the removal
+      await _supabaseService.createNotification(AppNotification(
+        id: '',
+        type: 'general',
+        title: 'Class Removed',
+        body: '${entry.courseCode} on ${entry.day} (${entry.start}-${entry.end}) for batch $batchName has been removed from the schedule.',
+        recipientType: 'teacher',
+        recipientId: entry.teacherInitial,
+        createdAt: '',
+      ));
+      // Notify all students in the batch
+      final batchStudents = await _supabaseService.getStudentsByBatchId(entry.batchId);
+      for (final student in batchStudents) {
+        await _supabaseService.createNotification(AppNotification(
+          id: '',
+          type: 'general',
+          title: 'Class Removed From Schedule',
+          body: '${entry.courseCode} on ${entry.day} (${entry.start}-${entry.end}) has been removed from your schedule.',
+          recipientType: 'student',
+          recipientId: student.studentId,
+          createdAt: '',
+        ));
+      }
       await load(); // Reload data
     }
   }

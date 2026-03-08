@@ -656,7 +656,7 @@ class _UsersTabState extends State<_UsersTab> {
                   child: const Icon(Icons.group_work_outlined, color: Color(0xFF8B5CF6), size: 20),
                 ),
                 title: Text(b.name, style: AppTheme.bodyMedium),
-                subtitle: Text('ID: ${b.id} • Session: ${b.session} • $studentCount students', style: AppTheme.caption),
+                subtitle: Text('Session: ${b.session} • $studentCount students', style: AppTheme.caption),
                 trailing: PopupMenuButton<String>(
                   onSelected: (v) {
                     if (v == 'edit') _editBatch(b);
@@ -1795,7 +1795,7 @@ class _AcademicTabState extends State<_AcademicTab> {
                   child: const Icon(Icons.meeting_room_outlined, color: AppTheme.infoCyan, size: 20),
                 ),
                 title: Text(r.name, style: AppTheme.bodyMedium),
-                subtitle: Text('ID: ${r.id}', style: AppTheme.caption),
+                subtitle: Text('Room', style: AppTheme.caption),
                 trailing: PopupMenuButton<String>(
                   onSelected: (v) {
                     if (v == 'edit') _editRoom(r);
